@@ -103,7 +103,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
             holder.checkBox.setVisibility(View.VISIBLE);
 
         } else {
-            //非编辑状态需要
+            //非编辑状态
             itemClicked(holder, position);
             if (bean.getFlag() == 1) {
                 holder.read.setVisibility(View.INVISIBLE);

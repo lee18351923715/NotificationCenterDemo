@@ -1,6 +1,8 @@
 package com.sample.notificationcenter;
 
 import android.app.ActivityManager;
+import android.app.Notification;
+import android.app.NotificationManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -11,31 +13,43 @@ import android.util.Log;
 import android.widget.Toast;
 
 import androidx.annotation.RequiresApi;
+import androidx.core.app.NotificationCompat;
 
 import java.util.List;
 
 import static android.content.Context.ACTIVITY_SERVICE;
 
+/**
+ * 进入d:sdk/platform-tools文件夹下
+ * 发送adb指令   adb shell am broadcast -a adb.addmessage -n com.sample.notificationcenter/.ADBReceiver
+ */
 public class ADBReceiver extends BroadcastReceiver {
 
     public static BoardcastListener boardcastListensr;
 
     private final String ADB_ACTION = "adb.addmessage";
 
+    @RequiresApi(api = Build.VERSION_CODES.Q)
     @Override
     public void onReceive(Context context, Intent intent) {
-        Toast.makeText(context, "您收到一条新的消息，请尽快查收！", Toast.LENGTH_SHORT).show();
+
         String action = intent.getAction();
         if (ADB_ACTION.equals(action)) {
-            if (isBackground(context)) {
-                if (boardcastListensr != null) {
-                    //非前台运行  插入数据库
-                    boardcastListensr.addMessage();
+            if(isAppRunning(context)){
+                if (isBackground(context)) {
+                        //非前台运行  插入数据库
+                        MessageBean bean = MessageDAO.getMessage();
+                        MessageDAO.saveMessage(context, bean);
+                } else {
+                    Toast.makeText(context, "您收到一条新的消息，请尽快查收！", Toast.LENGTH_SHORT).show();
+                    //前台运行，插入list中
+                    boardcastListensr.insertMessage();
                 }
-            } else {
-                //前台运行，插入list中
-                boardcastListensr.insertMessage();
+            }else {
+                MessageBean bean = MessageDAO.getMessage();
+                MessageDAO.saveMessage(context, bean);
             }
+
         }
     }
 
@@ -59,14 +73,20 @@ public class ADBReceiver extends BroadcastReceiver {
      * 判断某个app进程是否在运行
      *
      * @param context
-     * @param appInfo
      * @return
      */
-    public static boolean isRunningProcess(Context context, String appInfo) {
-        ActivityManager myManager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-        List<ActivityManager.RunningAppProcessInfo> runningAppPs = myManager.getRunningAppProcesses();
-        if (runningAppPs != null && runningAppPs.size() > 0) {
-            if (runningAppPs.contains(appInfo)) {
+    @RequiresApi(api = Build.VERSION_CODES.Q)
+    static boolean isAppRunning(Context context) {
+        ActivityManager activityManager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        List<ActivityManager.RunningTaskInfo> list = null;
+        if (activityManager != null) {
+            list = activityManager.getRunningTasks(100);
+        }
+        if (list == null || list.size() <= 0) {
+            return false;
+        }
+        for (ActivityManager.RunningTaskInfo info : list) {
+            if (info.baseActivity.getPackageName().equals(context.getPackageName())) {
                 return true;
             }
         }
@@ -116,11 +136,5 @@ public class ADBReceiver extends BroadcastReceiver {
 
     public interface BoardcastListener {
         void insertMessage();//讲新增的信息插入到list中
-
-        void addMessage();//将新增的信息插入到数据库中
-    }
-
-    public void setBoardcastListensr(BoardcastListener boardcastListensr) {
-        this.boardcastListensr = boardcastListensr;
     }
 }
