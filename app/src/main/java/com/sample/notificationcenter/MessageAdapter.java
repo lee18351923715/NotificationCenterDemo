@@ -30,7 +30,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
         this.context = context;
         this.list = list;
         isClicked = new ArrayList<>();
-        for(int i=0; i<list.size(); i++){
+        for (int i = 0; i < list.size(); i++) {
             isClicked.add(false);
         }
     }
@@ -44,12 +44,12 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
         holder.itemView.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                if (itemClickListener!=null) {
+                if (itemClickListener != null) {
                     isClicked.clear();
-                    for(int i=0; i<list.size(); i++){
+                    for (int i = 0; i < list.size(); i++) {
                         isClicked.add(false);
                     }
-                    isClicked.set(holder.getLayoutPosition(),true);
+                    isClicked.set(holder.getLayoutPosition(), true);
                     notifyDataSetChanged();
                     itemClickListener.onItemClick(holder.getLayoutPosition());
                 }
@@ -93,11 +93,13 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
          */
         if (editMode) {
             isClicked.clear();
-            for(int i=0; i<list.size(); i++){
+            for (int i = 0; i < list.size(); i++) {
                 isClicked.add(false);
             }
             itemClicked(holder, position);
+
             holder.read.setVisibility(View.INVISIBLE);
+
             holder.checkBox.setVisibility(View.VISIBLE);
 
         } else {

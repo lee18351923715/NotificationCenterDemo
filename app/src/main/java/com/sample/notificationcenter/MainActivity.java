@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.widget.Button;
@@ -16,10 +17,11 @@ import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity implements View.OnClickListener,
-        MessageAdapter.OnItemClickListener, ADBReceiver.BoardcastListener {
+        MessageAdapter.OnItemClickListener {
 
     private SlideRecyclerView recyclerView;
 
@@ -28,7 +30,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     private int position;
 
-    private Button refresh;
     private View visibilityLayout;
     private TextView newsTitleText;
     private TextView newsContentText;
@@ -46,7 +47,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     //点击了全选
     private boolean checkAll;
     //编辑模式
-    private boolean editMode;
+    private boolean editMode = false;
     //对应全选按钮
     private boolean clicked;
     //区分是不是删除确认界面
@@ -58,9 +59,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     private int unread;
 
-    private ADBReceiver adbReceiver = new ADBReceiver();
-    private final String ADB_ACTION = "adb.addmessage";
-
     @RequiresApi(api = Build.VERSION_CODES.O)
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -69,15 +67,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         initView();
         updateUnRead();
 
-        //动态注册广播接收器，拦截"adb.addmessage"的广播
-        adbReceiver = new ADBReceiver();
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(ADB_ACTION);
-        registerReceiver(adbReceiver,filter);
-        //启动Service
-        adbReceiver.setBoardcastListensr(this);
-        Intent welcomeIntent = new Intent(this, ListenService.class);
-        startService(welcomeIntent);
+        ADBReceiver.boardcastListensr = new ADBReceiver.BoardcastListener() {
+            @Override
+            public void insertMessage() {
+                setData();
+            }
+
+            @Override
+            public void addMessage() {
+                MessageDAO.saveMessage(MainActivity.this, MessageDAO.getMessage());
+            }
+        };
+
     }
 
     private void initView() {
@@ -103,13 +104,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         delete.setOnClickListener(this);
         edit.setOnClickListener(this);
 
-        refresh = findViewById(R.id.refresh_button);
-        refresh.setOnClickListener(this);
         recyclerView = findViewById(R.id.message_list);
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         //增加或减少条目动画效果，不要就注掉
         recyclerView.setItemAnimator(new DefaultItemAnimator());
-
+        //数据源初始化，从数据库中获取数据
         if (MessageDAO.getNews(this) == null) {
             list = new ArrayList<>();
         } else {
@@ -117,8 +116,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
         adapter = new MessageAdapter(this, list);
         adapter.setOnItemClickListener(this);
-        adbReceiver.setBoardcastListensr(this);
+
         recyclerView.setAdapter(adapter);
+        //根据有无数据确定是否显示无消息页面
         if (MessageDAO.getNews(this).size() == 0) {
             edit.setEnabled(false);
             setNoMessage();
@@ -132,26 +132,23 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     public void onClick(View view) {
         int id = view.getId();
         switch (id) {
-            case R.id.refresh_button:
-                setData();
-                break;
-            case R.id.left_button:
-            case R.id.right_button:
-                buttonConfirm(id);
-                break;
-            case R.id.selectall_button:
-                selectAll();
-                break;
-            case R.id.readed_button:
-                messageRead();
-                break;
-            case R.id.delete_main_button:
-                deleteMessage(false);//false表示点击的是最上方删除按钮,true表示点击的是侧滑的删除按钮
-                break;
-            case R.id.edit_button:
+            case R.id.edit_button://编辑按钮
                 editMessage();
                 break;
-            case R.id.send:
+            case R.id.selectall_button://全选按钮
+                selectAll();
+                break;
+            case R.id.readed_button://已读按钮
+                messageRead();
+                break;
+            case R.id.delete_main_button://删除按钮
+                deleteMessage(false);//false表示点击的是最上方删除按钮,true表示点击的是侧滑的删除按钮
+                break;
+            case R.id.left_button:
+            case R.id.right_button://消息内容展示页面中两个button的功能
+                buttonConfirm(id);
+                break;
+            case R.id.send://广播发送按钮
                 Intent intent = new Intent("adb.addmessage");
                 sendBroadcast(intent);
                 break;
@@ -159,7 +156,193 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     /**
-     * 列表item点击事件处理
+     * 编辑按钮
+     */
+    private void editMessage() {
+        editMode = !editMode;
+        if (editMode) {
+            //编辑状态
+            showEdit(View.VISIBLE);
+            edit.setText("取消");
+            visibilityLayout.setVisibility(View.INVISIBLE);
+        } else {
+            //取消编辑状态
+            showEdit(View.INVISIBLE);
+            edit.setText("编辑");
+            visibilityLayout.setVisibility(View.VISIBLE);
+            all.setText("全选");
+            clicked = false;
+            checkAll = false;
+            for (MessageBean bean : list) {
+                bean.setChecked(false);
+            }
+            visibilityLayout.setVisibility(View.INVISIBLE);
+        }
+        adapter.editMode = editMode;//将编辑状态传递给adapter
+        adapter.notifyDataSetChanged();
+    }
+
+    /**
+     * 全选按钮
+     */
+    private void selectAll() {
+        clicked = !clicked;
+        visibilityLayout.setVisibility(View.INVISIBLE);
+        if (clicked) {
+            //全选
+            all.setText("取消全选");
+            checkAll = true;
+            //全选过程中如果存在未读消息则已读按钮Enable为true，如果不存在那么已读按钮Enable为false
+            int index = 0;
+            for (int i = 0; i < list.size(); i++) {
+                MessageBean bean = list.get(i);
+                bean.setChecked(true);
+                selectedPosition.add(i);
+                if (bean.getFlag() == 0) {
+                    index++;
+                }
+            }
+            if (index != 0) {
+                if (!read.isEnabled()) {
+                    read.setEnabled(true);
+                    delete.setEnabled(true);
+                }
+            } else {
+                if (!read.isEnabled()) {
+                    read.setEnabled(false);
+                    delete.setEnabled(true);
+                }
+            }
+        //取消全选,清空记录复选框被选中的bean对象的位置的集合，并将所有bean对象的checked属性设为false
+        } else {
+            selectedPosition.clear();
+            read.setEnabled(false);
+            delete.setEnabled(false);
+            //反选
+            all.setText("全选");
+            checkAll = false;
+
+            for (MessageBean bean : list) {
+                bean.setChecked(false);
+            }
+        }
+        adapter.notifyDataSetChanged();
+    }
+    /**
+     * 设为已读按钮
+     */
+    private void messageRead() {
+        int index = 0;//记录完成已读消息的数量
+        //设置选中item的已读状态
+        for (int i = 0; i < selectedPosition.size(); i++) {
+            MessageBean bean = list.get(selectedPosition.get(i));
+            if (bean.getFlag() == 0) {
+                index++;
+            }
+            bean.setFlag(1);
+            MessageDAO.update(this, bean);//bean对象已读状态发生变化后同步更新到数据库中
+
+        }
+        adapter.notifyDataSetChanged();
+        updateUnRead();
+        Toast.makeText(this, "完成" + index + "条信息已读！", Toast.LENGTH_SHORT).show();
+    }
+    /**
+     * 删除
+     *
+     * @param deleteItem=true ? 侧滑删除 ： 选择删除
+     */
+    private void deleteMessage(boolean deleteItem) {
+        confirm = true;//进入删除模式(右面的页面会提示是否确认删除)
+        this.deleteItem = deleteItem;
+        visibilityLayout.setVisibility(View.VISIBLE);
+        newsTitleText.setVisibility(View.INVISIBLE);
+        newsContentText.setText("确定删除所选（有）信息吗");
+        rightButton.setVisibility(View.VISIBLE);
+        leftButton.setVisibility(View.VISIBLE);
+        leftButton.setText("确定删除");
+        rightButton.setText("取消");
+    }
+
+    /**
+     * 右边界面的左右两个按钮的点击事件处理
+     *
+     * @param id  R.id.left_button为左边按钮，R.id.right_button为右边按钮
+     */
+    private void buttonConfirm(int id) {
+        if (!confirm) {
+            //不是删除页面，只需要显示信息内容
+            int type = list.get(position).getType();
+            showToast(id, type);
+        } else {
+            //需要显示删除页面
+            confirm = false;
+            if (id == R.id.left_button) {
+                if (!deleteItem) {
+                    //删除选中的所有信息，首先确认删除消息
+                    List<MessageBean> removeList = new ArrayList<>();
+                    for (int i = 0; i < selectedPosition.size(); i++) {
+                        int position = selectedPosition.get(i);
+                        MessageBean bean = list.get(position);
+                        removeList.add(bean);
+                        MessageDAO.delete(this, bean);
+                    }
+                    //删除选中item对应的数据
+                    list.removeAll(removeList);
+                    //清空已选中item的position数据
+                    selectedPosition.clear();
+                    updateUnRead();
+                } else {
+                    MessageDAO.delete(this, list.get(position));
+                    list.remove(position);
+                    visibilityLayout.setVisibility(View.INVISIBLE);
+                    updateUnRead();
+                    adapter.notifyItemRemoved(position);
+
+                    if (list.size() == 0) {
+                        showEdit(View.INVISIBLE);
+                        edit.setText("编辑");
+                        edit.setEnabled(false);
+                        editMode = false;
+                        adapter.editMode = false;
+                        setNoMessage();
+                    }
+                    newsTitleText.setVisibility(View.INVISIBLE);
+                    return;
+                }
+            } else if (id == R.id.right_button) {
+                //取消按钮功能
+                visibilityLayout.setVisibility(View.INVISIBLE);
+                recyclerView.closeMenu();
+                newsTitleText.setVisibility(View.VISIBLE);
+                return;
+            }
+
+            //删除后如果没数据了 隐藏功能键 且编辑按钮不可点击
+            if (list.size() == 0) {
+                showEdit(View.INVISIBLE);
+                edit.setText("编辑");
+                edit.setEnabled(false);
+                editMode = false;
+                adapter.editMode = false;
+                updateUnRead();
+                setNoMessage();
+            }
+
+            visibilityLayout.setVisibility(View.INVISIBLE);
+            //删除后选中项为0，"已读"、"删除"按钮置灰
+            read.setEnabled(false);
+            delete.setEnabled(false);
+
+            all.setText("全选");
+            checkAll = false;
+
+            adapter.notifyDataSetChanged();
+        }
+    }
+
+    /**
+     * 列表item点击事件处理,adapter中接口方法的实现
      *
      * @param position
      */
@@ -174,9 +357,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             //非编辑模式点击item
             recyclerView.closeMenu();
             refresh(bean.getTitle(), bean.getMessage(), bean.getType());
-            bean.setRead(true);
             bean.setFlag(1);
-            //adapter.notifyItemChanged(position, bean.isRead());
+            MessageDAO.update(this, bean);//将已读状态同步到数据库中
         } else {
             //编辑模式下点击item
             boolean isChecked = bean.isChecked();
@@ -232,187 +414,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         this.position = position;
         deleteMessage(true);
     }
-
-    /**
-     * 右边界面的左右两个按钮的点击事件处理
-     *
-     * @param id
-     */
-    private void buttonConfirm(int id) {
-        if (!confirm) {
-            //不是删除页面，只需要显示信息内容
-            int type = list.get(position).getType();
-            showToast(id, type);
-        } else {
-            //需要显示删除页面
-            confirm = false;
-            if (id == R.id.left_button) {
-                if (!deleteItem) {
-                    //删除选中的所有信息，首先确认删除消息
-                    List<MessageBean> removeList = new ArrayList<>();
-                    for (int i = 0; i < selectedPosition.size(); i++) {
-                        int position = selectedPosition.get(i);
-                        MessageBean bean = list.get(position);
-                        removeList.add(bean);
-                    }
-                    //删除选中item对应的数据
-                    list.removeAll(removeList);
-                    //清空已选中item的position数据
-                    selectedPosition.clear();
-                    updateUnRead();
-                } else {
-                    list.remove(position);
-                    visibilityLayout.setVisibility(View.INVISIBLE);
-                    updateUnRead();
-                    adapter.notifyItemRemoved(position);
-
-                    if (list.size() == 0) {
-                        showEdit(View.INVISIBLE);
-                        edit.setText("编辑");
-                        edit.setEnabled(false);
-                        editMode = false;
-                        refresh.setEnabled(true);
-                        adapter.editMode = false;
-                        setNoMessage();
-                    }
-                    newsTitleText.setVisibility(View.INVISIBLE);
-                    return;
-                }
-            } else if (id == R.id.right_button) {
-                visibilityLayout.setVisibility(View.INVISIBLE);
-                recyclerView.closeMenu();
-                newsTitleText.setVisibility(View.VISIBLE);
-                return;
-            }
-
-            //删除后如果没数据了 隐藏功能键 且编辑按钮不可点击
-            if (list.size() == 0) {
-                showEdit(View.INVISIBLE);
-                edit.setText("编辑");
-                edit.setEnabled(false);
-                editMode = false;
-                refresh.setEnabled(true);
-                adapter.editMode = false;
-                updateUnRead();
-                setNoMessage();
-            }
-
-            visibilityLayout.setVisibility(View.INVISIBLE);
-            //删除后选中项为0，"已读"、"删除"按钮置灰
-            read.setEnabled(false);
-            delete.setEnabled(false);
-
-            all.setText("全选");
-            checkAll = false;
-
-            adapter.notifyDataSetChanged();
-        }
-    }
-
-    /**
-     * 设为已读按钮
-     */
-    private void messageRead() {
-        int index = 0;
-        //设置选中item的已读状态
-        for (int i = 0; i < selectedPosition.size(); i++) {
-            MessageBean bean = list.get(selectedPosition.get(i));
-            if (bean.getFlag() == 0) {
-                index++;
-            }
-            bean.setRead(true);
-            bean.setFlag(1);
-        }
-        adapter.notifyDataSetChanged();
-        updateUnRead();
-        Toast.makeText(this, "完成" + index + "条信息已读！", Toast.LENGTH_SHORT).show();
-    }
-
-    /**
-     * 删除
-     *
-     * @param deleteItem true ? 侧滑删除 ： 选择删除
-     */
-    private void deleteMessage(boolean deleteItem) {
-        confirm = true;//进入删除模式
-        this.deleteItem = deleteItem;
-        visibilityLayout.setVisibility(View.VISIBLE);
-        newsTitleText.setVisibility(View.INVISIBLE);
-        newsContentText.setText("确定删除所选（有）信息吗");
-        rightButton.setVisibility(View.VISIBLE);
-        leftButton.setVisibility(View.VISIBLE);
-        leftButton.setText("确定删除");
-        rightButton.setText("取消");
-    }
-
-    /**
-     * 编辑按钮
-     */
-    private void editMessage() {
-        editMode = !editMode;
-        if (editMode) {
-            //编辑状态
-            showEdit(View.VISIBLE);
-            refresh.setEnabled(false);
-            edit.setText("取消");
-            visibilityLayout.setVisibility(View.INVISIBLE);
-        } else {
-            //取消编辑
-            showEdit(View.INVISIBLE);
-            refresh.setEnabled(true);
-            edit.setText("编辑");
-            visibilityLayout.setVisibility(View.VISIBLE);
-
-            all.setText("全选");
-            clicked = false;
-            checkAll = false;
-            for (MessageBean bean : list) {
-                bean.setChecked(false);
-            }
-            visibilityLayout.setVisibility(View.INVISIBLE);
-        }
-        adapter.editMode = editMode;
-        adapter.notifyDataSetChanged();
-    }
-
-    /**
-     * 全选按钮
-     */
-    private void selectAll() {
-        clicked = !clicked;
-        visibilityLayout.setVisibility(View.INVISIBLE);
-        if (clicked) {
-            //全选
-            all.setText("取消全选");
-            checkAll = true;
-
-            if (!read.isEnabled()) {
-                read.setEnabled(true);
-                delete.setEnabled(true);
-            }
-
-            for (int i = 0; i < list.size(); i++) {
-                MessageBean bean = list.get(i);
-                bean.setChecked(true);
-                selectedPosition.add(i);
-            }
-
-        } else {
-            selectedPosition.clear();
-
-            read.setEnabled(false);
-            delete.setEnabled(false);
-            //反选
-            all.setText("全选");
-            checkAll = false;
-
-            for (MessageBean bean : list) {
-                bean.setChecked(false);
-            }
-        }
-        adapter.notifyDataSetChanged();
-    }
-
     /**
      * 设置列表中的选中项
      *
@@ -429,10 +430,24 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         if (checked) {
             //checkbox为选中状态
             selectedPosition.add(position);
-            if (!read.isEnabled()) {
-                read.setEnabled(true);
-                delete.setEnabled(true);
+            int index = 0;
+            for (int i = 0; i < selectedPosition.size(); i++) {
+                if (list.get(i).getFlag() == 0) {
+                    index++;
+                }
             }
+            if (index != 0) {
+                if (!read.isEnabled()) {
+                    read.setEnabled(true);
+                    delete.setEnabled(true);
+                }
+            } else {
+                if (!read.isEnabled()) {
+                    read.setEnabled(false);
+                    delete.setEnabled(true);
+                }
+            }
+
         } else {
             int size = selectedPosition.size();
             if (size > 0) {
@@ -549,9 +564,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
      * 手动添加数据
      */
     private void setData() {
-        list.add(0, MessageDAO.getMessage());
-        if(adapter.isClicked.size()!=0){
-            adapter.isClicked.set(0,false);
+        MessageBean bean = MessageDAO.getMessage();
+        MessageDAO.saveMessage(this, bean);
+        List<MessageBean> temp = MessageDAO.getNews(this);
+        Collections.reverse(temp);
+        bean = temp.get(temp.size() - 1);
+        list.add(0, bean);
+        if (adapter.isClicked.size() != 0) {
+            adapter.isClicked.set(0, false);
         }
         if (adapter != null) {
             if (list.size() == 1) {
@@ -570,58 +590,21 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             updateUnRead();
         }
     }
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            if (MessageDAO.getNews(this) != null) {
-                for (MessageBean messageBean : MessageDAO.getNews(this)) {
-                    MessageDAO.delete(this, messageBean);
-                }
-            }
-            if (list != null) {
-                for (MessageBean messageBean : list) {
-                    MessageDAO.saveMessage(this, messageBean);
-                }
-            }
-            list.clear();
-            finish();
-            return true;
-        } else {
-            return super.onKeyDown(keyCode, event);
-        }
-    }
-
-    @Override
-    public void insertMessage() {
-        setData();
-    }
-
-    //新增一条信息到数据库中
-    @Override
-    public void addMessage() {
-        List<MessageBean> temp = MessageDAO.getNews(this);
-        temp.add(0,MessageDAO.getMessage());
-        for (MessageBean messageBean : temp) {
-            MessageDAO.saveMessage(this,messageBean);
-        }
-    }
+    //app在前台运行时就直接插入到list中显示到页面上同时将该数据同步到数据库中
+//    @Override
+//    public void insertMessage() {
+//        setData();
+//    }
+//
+//    //app后台运行时就直接新增一条信息到数据库中
+//    @Override
+//    public void addMessage() {
+//        MessageDAO.saveMessage(this, MessageDAO.getMessage());
+//    }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        unregisterReceiver(adbReceiver);
-        //重新将数据保存到数据库中
-        if (MessageDAO.getNews(this) != null) {
-            for (MessageBean messageBean : MessageDAO.getNews(this)) {
-                MessageDAO.delete(this, messageBean);
-            }
-        }
-        if (list != null) {
-            for (MessageBean messageBean : list) {
-                MessageDAO.saveMessage(this, messageBean);
-            }
-        }
-        list.clear();
+        //unregisterReceiver(adbReceiver);
     }
 }

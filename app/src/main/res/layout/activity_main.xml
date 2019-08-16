@@ -35,20 +35,12 @@
 
         <Button
             android:id="@+id/send"
-            android:layout_width="70dp"
-            android:layout_height="35dp"
-            android:layout_toLeftOf="@id/refresh_button"
-            android:text="发送广播"
-            android:textSize="10sp"
-            android:layout_centerVertical="true"/>
-        <Button
-            android:id="@+id/refresh_button"
-            android:layout_width="50dp"
+            android:layout_width="wrap_content"
             android:layout_height="35dp"
             android:layout_alignParentRight="true"
             android:layout_centerVertical="true"
             android:layout_marginRight="20dp"
-            android:text="刷新"
+            android:text="发送广播"
             android:textSize="10sp" />
 
         <LinearLayout

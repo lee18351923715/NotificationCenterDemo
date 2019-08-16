@@ -3,7 +3,6 @@
     package="com.sample.notificationcenter">
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
     <uses-permission android:name="android.permission.GET_TASKS" />
 
     <application
@@ -13,10 +12,14 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
-       <!-- <receiver
+         <receiver
             android:name=".ADBReceiver"
             android:enabled="true"
-            android:exported="true"></receiver>-->
+            android:exported="true">
+             <intent-filter>
+                 <action android:name="adb.addmessage" />
+             </intent-filter>
+         </receiver>
         <receiver
             android:name=".BootCompleted"
             android:enabled="true"
@@ -29,7 +32,7 @@
         <service
             android:name=".ListenService"
             android:enabled="true"
-            android:exported="true"></service>
+            android:exported="true" />
 
         <activity
             android:name=".MainActivity"

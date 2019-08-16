@@ -18,47 +18,43 @@ import static android.content.Context.ACTIVITY_SERVICE;
 
 public class ADBReceiver extends BroadcastReceiver {
 
-    private BoardcastListener boardcastListensr;
-
-    public ADBReceiver() {
-    }
-
+    public static BoardcastListener boardcastListensr;
 
     private final String ADB_ACTION = "adb.addmessage";
 
-
     @Override
     public void onReceive(Context context, Intent intent) {
-       String action = intent.getAction();
-        if(ADB_ACTION.equals(action)){
-            Toast.makeText(context,"您收到一条新的消息，请尽快查收！",Toast.LENGTH_SHORT).show();
-           if(isBackground(context)){
-               if(boardcastListensr!=null){
-                   //非前台运行  插入数据库
-                   boardcastListensr.addMessage();
-               }
-           }else {
-               //前台运行，插入list中
-               boardcastListensr.insertMessage();
-
-           }
+        Toast.makeText(context, "您收到一条新的消息，请尽快查收！", Toast.LENGTH_SHORT).show();
+        String action = intent.getAction();
+        if (ADB_ACTION.equals(action)) {
+            if (isBackground(context)) {
+                if (boardcastListensr != null) {
+                    //非前台运行  插入数据库
+                    boardcastListensr.addMessage();
+                }
+            } else {
+                //前台运行，插入list中
+                boardcastListensr.insertMessage();
+            }
         }
     }
 
     /**
      * 判断Activity是否在栈顶
+     *
      * @param context
      * @param myPackage
      * @return
      */
     @RequiresApi(api = Build.VERSION_CODES.Q)
-    public boolean isForeground(Context context, String myPackage){
+    public boolean isForeground(Context context, String myPackage) {
         ActivityManager manager = (ActivityManager) context.getSystemService(ACTIVITY_SERVICE);
-        List< ActivityManager.RunningTaskInfo > runningTaskInfo = manager.getRunningTasks(1);
+        List<ActivityManager.RunningTaskInfo> runningTaskInfo = manager.getRunningTasks(1);
         ComponentName componentInfo = runningTaskInfo.get(0).topActivity;
-        if(componentInfo.getPackageName().equals(myPackage)) return true;
+        if (componentInfo.getPackageName().equals(myPackage)) return true;
         return false;
     }
+
     /**
      * 判断某个app进程是否在运行
      *
@@ -80,8 +76,8 @@ public class ADBReceiver extends BroadcastReceiver {
     /**
      * 判断一个Activity是否正在运行
      *
-     * @param pkg  pkg为应用包名
-     * @param cls  cls为类名eg
+     * @param pkg     pkg为应用包名
+     * @param cls     cls为类名eg
      * @param context
      * @return
      */
@@ -118,12 +114,13 @@ public class ADBReceiver extends BroadcastReceiver {
         return false;
     }
 
-    public interface BoardcastListener{
+    public interface BoardcastListener {
         void insertMessage();//讲新增的信息插入到list中
+
         void addMessage();//将新增的信息插入到数据库中
     }
 
-    public void setBoardcastListensr(BoardcastListener boardcastListensr){
+    public void setBoardcastListensr(BoardcastListener boardcastListensr) {
         this.boardcastListensr = boardcastListensr;
     }
 }
