@@ -37,7 +37,7 @@ public class MessageDAO {
     }
 
     /**
-     * 从数据库中初始化模拟新闻数据
+     * 从数据库中初始化模拟数据
      */
     public static List<MessageBean> getNews(Context context) {
         List<MessageBean> mNewsList = new ArrayList<>();
@@ -103,22 +103,6 @@ public class MessageDAO {
                 break;
         }
         return messageBean;
-    }
-
-    /**
-     * 保存list数据到数据库中
-     */
-    public static void saveList(List<MessageBean> list, Context context) {
-        if (MessageDAO.getNews(context) != null) {
-            for (MessageBean messageBean : MessageDAO.getNews(context)) {
-                MessageDAO.delete(context, messageBean);
-            }
-        }
-        if (list != null) {
-            for (MessageBean messageBean : list) {
-                MessageDAO.saveMessage(context, messageBean);
-            }
-        }
     }
 
     /**

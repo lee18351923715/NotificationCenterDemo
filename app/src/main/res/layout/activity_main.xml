@@ -11,90 +11,90 @@
         android:layout_height="wrap_content"
         android:background="#000000">
 
+        <View
+            android:id="@+id/view"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_centerHorizontal="true"/>
         <TextView
             android:id="@+id/text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:paddingTop="5dp"
             android:paddingLeft="12dp"
+            android:paddingTop="5dp"
             android:text="消息中心"
             android:textColor="#F8F8FF"
-            android:textSize="20sp" />
+            android:textSize="24sp" />
 
         <TextView
             android:id="@+id/unread"
-            android:background="@drawable/bg_circle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_toRightOf="@+id/text"
+            android:background="@drawable/bg_circle"
             android:gravity="center"
             android:text="0"
             android:textColor="#F8F8FF"
             android:textSize="14sp"
-            android:visibility="gone"/>
+            android:visibility="gone" />
 
         <Button
             android:id="@+id/send"
-            android:layout_width="wrap_content"
-            android:layout_height="35dp"
+            android:layout_width="0dp"
+            android:layout_height="65dp"
             android:layout_alignParentRight="true"
             android:layout_centerVertical="true"
             android:layout_marginRight="20dp"
             android:text="发送广播"
             android:textSize="10sp" />
 
-        <LinearLayout
-            android:layout_width="wrap_content"
+        <Button
+            android:id="@+id/selectall_button"
+            android:layout_width="65dp"
             android:layout_height="wrap_content"
-            android:layout_centerVertical="true"
-            android:layout_toRightOf="@+id/text"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingTop="15dp">
+            android:paddingTop="30dp"
+            android:layout_toLeftOf="@id/readed_button"
+            android:background="#000000"
+            android:text="全选"
+            android:textColor="@color/button_text_color_selector"
+            android:textSize="16sp"
+            android:visibility="invisible" />
 
-            <Button
-                android:id="@+id/selectall_button"
-                android:layout_width="60dp"
-                android:layout_height="wrap_content"
-                android:background="#000000"
-                android:text="全选"
-                android:layout_marginLeft="150dp"
-                android:textColor="@color/button_text_color_selector"
-                android:textSize="14sp"
-                android:visibility="invisible" />
+        <Button
+            android:id="@+id/readed_button"
+            android:layout_width="40dp"
+            android:layout_height="wrap_content"
+            android:paddingTop="30dp"
+            android:layout_toLeftOf="@id/delete_main_button"
+            android:background="#000000"
+            android:text="已读"
+            android:textColor="@color/button_text_color_selector"
+            android:textSize="16sp"
+            android:visibility="invisible" />
 
-            <Button
-                android:id="@+id/readed_button"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:layout_marginLeft="0dp"
-                android:background="#000000"
-                android:text="已读"
-                android:textColor="@color/button_text_color_selector"
-                android:textSize="14sp"
-                android:visibility="invisible" />
+        <Button
+            android:id="@+id/delete_main_button"
+            android:layout_width="40dp"
+            android:layout_height="wrap_content"
+            android:paddingTop="30dp"
+            android:layout_toLeftOf="@id/edit_button"
+            android:background="#000000"
+            android:text="删除"
+            android:textColor="@color/button_text_color_selector"
+            android:textSize="16sp"
+            android:visibility="invisible" />
 
-            <Button
-                android:id="@+id/delete_main_button"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:layout_marginLeft="0dp"
-                android:background="#000000"
-                android:text="删除"
-                android:textColor="@color/button_text_color_selector"
-                android:textSize="14sp"
-                android:visibility="invisible" />
+        <Button
+            android:id="@+id/edit_button"
+            android:layout_width="40dp"
+            android:layout_height="wrap_content"
+            android:layout_toLeftOf="@id/view"
+            android:background="#000000"
+            android:text="编辑"
+            android:paddingTop="30dp"
+            android:textColor="@color/button_text_color_selector"
+            android:textSize="16sp" />
 
-            <Button
-                android:id="@+id/edit_button"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:layout_marginLeft="0dp"
-                android:background="#000000"
-                android:text="编辑"
-                android:textColor="@color/button_text_color_selector"
-                android:textSize="14sp" />
-        </LinearLayout>
     </RelativeLayout>
 
     <LinearLayout
@@ -102,32 +102,36 @@
         android:layout_height="match_parent"
         android:layout_below="@+id/title"
         android:orientation="horizontal">
+
         <FrameLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="40">
+
             <com.sample.notificationcenter.SlideRecyclerView
                 android:id="@+id/message_list"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:background="#282828" />
+
             <TextView
                 android:id="@+id/no_message"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
+                android:background="#282828"
+                android:gravity="center"
                 android:text="无消息"
                 android:textColor="#F8F8FF"
                 android:textSize="25sp"
-                android:gravity="center"
-                android:visibility="invisible"
-                android:background="#282828"/>
+                android:visibility="invisible" />
         </FrameLayout>
 
         <View
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:background="#000000"/>
+            android:background="#000000" />
+
         <include
             layout="@layout/news_content_frag"
             android:layout_width="0dp"

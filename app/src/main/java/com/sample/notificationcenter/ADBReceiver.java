@@ -1,23 +1,16 @@
 package com.sample.notificationcenter;
 
 import android.app.ActivityManager;
-import android.app.Notification;
-import android.app.NotificationManager;
 import android.content.BroadcastReceiver;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
-import android.text.TextUtils;
 import android.util.Log;
 import android.widget.Toast;
 
 import androidx.annotation.RequiresApi;
-import androidx.core.app.NotificationCompat;
 
 import java.util.List;
-
-import static android.content.Context.ACTIVITY_SERVICE;
 
 /**
  * 进入d:sdk/platform-tools文件夹下
@@ -26,6 +19,8 @@ import static android.content.Context.ACTIVITY_SERVICE;
 public class ADBReceiver extends BroadcastReceiver {
 
     public static BoardcastListener boardcastListensr;
+
+    private final String START_MESSAGE_CENTER = "start_message_center";
 
     private final String ADB_ACTION = "adb.addmessage";
 
@@ -50,23 +45,11 @@ public class ADBReceiver extends BroadcastReceiver {
                 MessageDAO.saveMessage(context, bean);
             }
 
+        }else if (START_MESSAGE_CENTER.equals(action)){
+            Intent intent1 = new Intent(context,MainActivity.class);
+            //intent1.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);//添加标记
+            context.startActivity(intent1);
         }
-    }
-
-    /**
-     * 判断Activity是否在栈顶
-     *
-     * @param context
-     * @param myPackage
-     * @return
-     */
-    @RequiresApi(api = Build.VERSION_CODES.Q)
-    public boolean isForeground(Context context, String myPackage) {
-        ActivityManager manager = (ActivityManager) context.getSystemService(ACTIVITY_SERVICE);
-        List<ActivityManager.RunningTaskInfo> runningTaskInfo = manager.getRunningTasks(1);
-        ComponentName componentInfo = runningTaskInfo.get(0).topActivity;
-        if (componentInfo.getPackageName().equals(myPackage)) return true;
-        return false;
     }
 
     /**
@@ -89,26 +72,6 @@ public class ADBReceiver extends BroadcastReceiver {
             if (info.baseActivity.getPackageName().equals(context.getPackageName())) {
                 return true;
             }
-        }
-        return false;
-    }
-
-    /**
-     * 判断一个Activity是否正在运行
-     *
-     * @param pkg     pkg为应用包名
-     * @param cls     cls为类名eg
-     * @param context
-     * @return
-     */
-    @RequiresApi(api = Build.VERSION_CODES.Q)
-    public static boolean isClsRunning(Context context, String pkg, String cls) {
-        ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-        List<ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(1);
-        ActivityManager.RunningTaskInfo task = tasks.get(0);
-        if (task != null) {
-            return TextUtils.equals(task.topActivity.getPackageName(), pkg) &&
-                    TextUtils.equals(task.topActivity.getClassName(), cls);
         }
         return false;
     }

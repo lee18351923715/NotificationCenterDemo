@@ -1,13 +1,9 @@
 package com.sample.notificationcenter;
 
-import android.app.Notification;
 import android.content.ComponentName;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.os.Build;
 import android.os.Bundle;
-import android.util.Log;
-import android.view.KeyEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
@@ -15,7 +11,6 @@ import android.widget.Toast;
 
 import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.NotificationCompat;
 import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
@@ -55,8 +50,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private boolean clicked;
     //区分是不是删除确认界面
     private boolean confirm;
-    //区分是不是侧滑删除
-    private boolean deleteItem;
 
     private List<Integer> selectedPosition = new ArrayList<>();//选中的位置集合
 
@@ -69,7 +62,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         setContentView(R.layout.activity_main);
         initView();
         updateUnRead();
-
+        //广播监听 收到广播后会模拟接收到服务端推送，自动添加数据
         ADBReceiver.boardcastListensr = new ADBReceiver.BoardcastListener() {
             @Override
             public void insertMessage() {
@@ -116,11 +109,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         recyclerView.setAdapter(adapter);
         //根据有无数据确定是否显示无消息页面
-        if (MessageDAO.getNews(this).size() == 0) {
-            edit.setEnabled(false);
+        if (list.size() == 0) {
+            edit.setVisibility(View.INVISIBLE);
             setNoMessage();
         } else {
-            edit.setEnabled(true);
+            edit.setVisibility(View.VISIBLE);
             setMessage();
         }
     }
@@ -131,6 +124,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         switch (id) {
             case R.id.edit_button://编辑按钮
                 editMessage();
+                recyclerView.closeMenu();
                 break;
             case R.id.selectall_button://全选按钮
                 selectAll();
@@ -139,7 +133,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 messageRead();
                 break;
             case R.id.delete_main_button://删除按钮
-                deleteMessage(false);//false表示点击的是最上方删除按钮,true表示点击的是侧滑的删除按钮
+                deleteMessage();
                 break;
             case R.id.left_button:
             case R.id.right_button://消息内容展示页面中两个button的功能
@@ -147,7 +141,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 break;
             case R.id.send://广播发送按钮
                 Intent intent = new Intent("adb.addmessage");
-                intent.setComponent(new ComponentName("com.sample.notificationcenter","com.sample.notificationcenter.ADBReceiver"));
+                intent.setComponent(new ComponentName("com.sample.notificationcenter", "com.sample.notificationcenter.ADBReceiver"));
                 sendBroadcast(intent);
                 break;
         }
@@ -210,7 +204,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     delete.setEnabled(true);
                 }
             }
-        //取消全选,清空记录复选框被选中的bean对象的位置的集合，并将所有bean对象的checked属性设为false
+            //取消全选,清空记录复选框被选中的bean对象的位置的集合，并将所有bean对象的checked属性设为false
         } else {
             selectedPosition.clear();
             read.setEnabled(false);
@@ -225,6 +219,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
         adapter.notifyDataSetChanged();
     }
+
     /**
      * 设为已读按钮
      */
@@ -239,41 +234,76 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             bean.setFlag(1);
             MessageDAO.update(this, bean);//bean对象已读状态发生变化后同步更新到数据库中
         }
+        unEdit();//回到未编辑状态
+        updateUnRead();
+        adapter.notifyDataSetChanged();
+    }
+
+    /**
+     * 删除按钮点击事件
+     */
+    private void deleteMessage() {
+        if(selectedPosition.size()!=list.size()){
+            //删除选中的所有信息，首先确认删除消息
+            delete();//删除操作，将所选信息删除掉
+            updateUnRead();
+            unEdit();//回到未编辑状态页面
+            adapter.notifyDataSetChanged();
+        }else {
+            confirm = true;//进入删除模式(右面的页面会提示是否确认删除)
+            visibilityLayout.setVisibility(View.VISIBLE);
+            newsTitleText.setVisibility(View.INVISIBLE);
+            newsContentText.setText("确定删除所选（有）信息吗");
+            rightButton.setVisibility(View.VISIBLE);
+            leftButton.setVisibility(View.VISIBLE);
+            leftButton.setText("确定删除");
+            rightButton.setText("取消");
+        }
+    }
+
+    /**
+     * 主页面回到未编辑状态
+     */
+    public void unEdit(){
+        if(list.size() == 0){
+            edit.setVisibility(View.INVISIBLE);
+        }
         showEdit(View.INVISIBLE);
+        visibilityLayout.setVisibility(View.INVISIBLE);
         edit.setText("编辑");
+        editMode = !editMode;
+        adapter.editMode = editMode;
+        read.setEnabled(false);
+        delete.setEnabled(false);
         all.setText("全选");
-        clicked = false;
         checkAll = false;
         for (MessageBean bean : list) {
             bean.setChecked(false);
         }
-        visibilityLayout.setVisibility(View.INVISIBLE);
-        editMode = !editMode;
-        adapter.editMode = editMode;//将编辑状态传递给adapter
-        adapter.notifyDataSetChanged();
-        updateUnRead();
     }
+
     /**
-     * 删除
-     *
-     * @param deleteItem=true ? 侧滑删除 ： 选择删除
+     * 删除操作
      */
-    private void deleteMessage(boolean deleteItem) {
-        confirm = true;//进入删除模式(右面的页面会提示是否确认删除)
-        this.deleteItem = deleteItem;
-        visibilityLayout.setVisibility(View.VISIBLE);
-        newsTitleText.setVisibility(View.INVISIBLE);
-        newsContentText.setText("确定删除所选（有）信息吗");
-        rightButton.setVisibility(View.VISIBLE);
-        leftButton.setVisibility(View.VISIBLE);
-        leftButton.setText("确定删除");
-        rightButton.setText("取消");
+    private void delete() {
+        //删除选中的所有信息，首先确认删除消息
+        List<MessageBean> removeList = new ArrayList<>();
+        for (int i = 0; i < selectedPosition.size(); i++) {
+            int position = selectedPosition.get(i);
+            MessageBean bean = list.get(position);
+            removeList.add(bean);
+            MessageDAO.delete(this, bean);
+        }
+        //删除选中item对应的数据
+        list.removeAll(removeList);
+        //清空已选中item的position数据
+        selectedPosition.clear();
     }
 
     /**
      * 右边界面的左右两个按钮的点击事件处理
      *
-     * @param id  R.id.left_button为左边按钮，R.id.right_button为右边按钮
+     * @param id R.id.left_button为左边按钮，R.id.right_button为右边按钮
      */
     private void buttonConfirm(int id) {
         if (!confirm) {
@@ -284,50 +314,21 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             //需要显示删除页面
             confirm = false;
             if (id == R.id.left_button) {
-                if (!deleteItem) {
-                    //删除选中的所有信息，首先确认删除消息
-                    List<MessageBean> removeList = new ArrayList<>();
-                    for (int i = 0; i < selectedPosition.size(); i++) {
-                        int position = selectedPosition.get(i);
-                        MessageBean bean = list.get(position);
-                        removeList.add(bean);
-                        MessageDAO.delete(this, bean);
-                    }
-                    //删除选中item对应的数据
-                    list.removeAll(removeList);
-                    //清空已选中item的position数据
-                    selectedPosition.clear();
-                    updateUnRead();
-                } else {
-                    MessageDAO.delete(this, list.get(position));
-                    list.remove(position);
-                    visibilityLayout.setVisibility(View.INVISIBLE);
-                    updateUnRead();
-                    adapter.notifyItemRemoved(position);
-                    return;
-                }
+                delete();
+                updateUnRead();
             } else if (id == R.id.right_button) {
                 //取消按钮功能
-                visibilityLayout.setVisibility(View.INVISIBLE);
+                unEdit();
                 recyclerView.closeMenu();
+                adapter.notifyDataSetChanged();
                 return;
             }
-
             //删除后回到最初的页面，如果没数据了，则设置编辑键不可选中
-            showEdit(View.INVISIBLE);
-            visibilityLayout.setVisibility(View.INVISIBLE);
-            edit.setText("编辑");
-            editMode = !editMode;
-            adapter.editMode = editMode;
+            unEdit();
             if (list.size() == 0) {
-                edit.setEnabled(false);
+                edit.setVisibility(View.INVISIBLE);
                 setNoMessage();
             }
-            read.setEnabled(false);
-            delete.setEnabled(false);
-            all.setText("全选");
-            checkAll = false;
-
             adapter.notifyDataSetChanged();
         }
     }
@@ -403,8 +404,22 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     public void onDelete(final int position) {
         this.position = position;
-        deleteMessage(true);
+        MessageDAO.delete(this, list.get(position));
+        list.remove(position);
+        visibilityLayout.setVisibility(View.INVISIBLE);
+        updateUnRead();
+        if (list.size() == 0) {
+            edit.setVisibility(View.INVISIBLE);
+            setNoMessage();
+            read.setEnabled(false);
+            delete.setEnabled(false);
+            all.setText("全选");
+            checkAll = false;
+            adapter.notifyDataSetChanged();
+        }
+        adapter.notifyItemRemoved(position);
     }
+
     /**
      * 设置列表中的选中项
      *
@@ -427,6 +442,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     index++;
                 }
             }
+            /**
+             * 若选中未读消息的数量不为0，那么已读按钮可以点击，否则的话已读按钮不可以点击
+             */
             if (index != 0) {
                 if (!read.isEnabled()) {
                     read.setEnabled(true);
@@ -440,6 +458,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
 
         } else {
+            //checkbox为没有被选中状态,需要从selectposition中移除该位置
             int size = selectedPosition.size();
             if (size > 0) {
                 for (int i = 0; i < size; i++) {
@@ -449,27 +468,25 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     }
                 }
             }
-
+            //移除该位置后若checkbox选中的集合大小为0，已读和删除按钮不可点击
             if (selectedPosition.size() == 0) {
                 read.setEnabled(false);
                 delete.setEnabled(false);
             }
         }
 
-        if (selectedPosition.size() == 0) {
-            all.setText("全选");
-            clicked = false;
-        } else if (selectedPosition.size() == list.size()) {
+        if (selectedPosition.size() == list.size()) {
             all.setText("取消全选");
             clicked = true;
+        }else {
+            all.setText("全选");
+            clicked = false;
         }
     }
-
-
     /**
-     * 点击编辑后显示各个功能按钮
+     * 点击编辑后显示各个功能按钮,
      *
-     * @param visibility
+     * @param visibility View.VISIBLE表示显示全选等功能按钮，View.INVISIBLE表示不显示全选等功能按钮
      */
     private void showEdit(int visibility) {
         all.setVisibility(visibility);
@@ -566,7 +583,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
         if (adapter != null) {
             if (list.size() == 1) {
-                edit.setEnabled(true);
+                edit.setVisibility(View.VISIBLE);
                 setMessage();
             }
             //删除滑动回去，刷新列表数据
@@ -585,6 +602,5 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        //unregisterReceiver(adbReceiver);
     }
 }
