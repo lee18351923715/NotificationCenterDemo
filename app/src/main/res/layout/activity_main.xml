@@ -40,11 +40,11 @@
 
         <Button
             android:id="@+id/send"
-            android:layout_width="0dp"
-            android:layout_height="65dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
             android:layout_alignParentRight="true"
             android:layout_centerVertical="true"
-            android:layout_marginRight="20dp"
+            android:layout_margin="9dp"
             android:text="发送广播"
             android:textSize="10sp" />
 

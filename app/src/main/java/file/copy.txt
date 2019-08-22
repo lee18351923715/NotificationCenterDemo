@@ -1,0 +1,3393 @@
+#ifndef EXCELBASE_H
+#define EXCELBASE_H
+
+#include <QObject>
+#include <QAxObject>
+#include <QString>
+#include <QStringList>
+#include <QVariant>
+#include <SelectStandard.h>
+
+class ExcelBasePrivate;
+
+
+class ExcelBase : public QObject
+{
+public:
+    explicit ExcelBase(QObject *parent = nullptr);
+    ~ExcelBase();
+
+private:
+    Q_DISABLE_COPY(ExcelBase)   // 禁用该类的拷贝相关操作
+    Q_DECLARE_PRIVATE(ExcelBase)    // 内联inline相关
+    ExcelBasePrivate* const d_ptr;
+
+public:
+    // 设置方向的枚举常量
+    enum Alignment
+    {
+        xlTop   = -4160, // 靠上
+        xlLeft  = -4131, // 靠左
+        xlRight = -4152, // 靠右
+        xlCenter= -4108, // 靠中
+        xlBottom= -4107  // 靠下
+    };
+
+    // 创建一个Excel文件
+    bool create(const QString& filename = QString());
+
+    // 打开一个Excel文件
+    bool open(const QString& filename = QString());
+
+    // 另存Excel文件
+    void saveAs(const QString& filename);
+    void save();
+
+    // 关闭Excel文件
+    void close();
+
+    // 踢出当前打开的Excel，放弃此对象对该Excel的控制权，Excel文件仍打开状态，但丧失了控制权
+    void kick();
+
+    // 设置当前打开的Excel是否可见
+    void setVisible(bool value);
+
+    // 设置Excel文档的标题
+    void setCaption(const QString& value);
+
+    // 新建一本Excel文档
+    bool addBook();
+
+    // 返回当前Excel的Sheet数量
+    int sheetCount();
+
+    // 返回当前打开的Excel全部Sheet名
+    QStringList sheetNames();
+
+    // 返回当前sheet
+    bool currentSheet();
+
+    // 设置并指定当前sheet, 当前sheet索引：从1开始
+    bool setCurrentSheet(int index);
+
+    // 当前打开的Excel的sheet名
+    QString currentSheetName();
+
+    // 读取单元格的内容：row行从1开始，col列从1开始，返回指定单元格的内容
+    QVariant read(int row, int col);
+
+    // 读取单元格的内容：row行从1开始，col列从1开始，返回指定单元格的内容
+    inline QVariant cell(int row, int col)
+    {
+        return read(row, col);
+    }
+
+    // 写入单元格sheet的内容：row行从1开始，col列从1开始，value准备写入的内容
+    void write(int row, int col, QVariant& value);
+
+    void cellFormat(int row, int col, const QString& format);
+    void cellAlign(int row, int col, Alignment hAlign, Alignment vAlign);
+
+    // 获取有效区域信息
+    // rowStart() const
+    // rowEnd() const
+    // colStart() const
+    // colEnd() const
+    bool usedRange(int& rowStart, int& colStart, int& rowEnd, int& colEnd);
+
+    QVariant readAll();
+    void readAll(QList< QList<QVariant> >& cells );
+    bool writeCurrentSheet(const QList< QList<QVariant> >& cells);
+
+    static void convertToColName(int data, QString& res);
+    static QString to26AlpabetString(int data);
+    static void castListListVariant2Variant(const QList< QList<QVariant> >& cells, QVariant& res);
+    static void castVariant2ListListVariant(const QVariant& var, QList< QList<QVariant> >& res);
+};
+
+#endif // EXCELBASE_H
+
+
+#include "ExcelBase.h"
+#include <QFile>
+
+#include <QList>
+#include <QDebug>
+
+#if defined(Q_OS_WIN)
+#include <QAxObject>
+#endif
+
+#define TC_FREE(x) {delete x; x = nullptr;}
+
+class ExcelBasePrivate
+{
+    Q_DECLARE_PUBLIC(ExcelBase)
+
+public:
+    explicit ExcelBasePrivate(ExcelBase* qptr);
+    ~ExcelBasePrivate();
+
+    void construct();
+    void destroy();
+
+    ExcelBase* const q_ptr;
+
+
+    QAxObject* excel;
+    QAxObject* books;
+    QAxObject* book;
+    QAxObject* sheets;
+    QAxObject* sheet;
+
+    QString filename;
+    QString sheetName;
+
+};
+
+
+ExcelBasePrivate::ExcelBasePrivate(ExcelBase* qptr) : q_ptr(qptr),
+    excel(nullptr), books(nullptr), book(nullptr), sheets(nullptr), sheet(nullptr)
+{
+
+}
+
+ExcelBasePrivate::~ExcelBasePrivate()
+{
+    if( excel )
+    {
+        if( !excel->isNull() )
+        {
+            excel->dynamicCall("Quit()");
+        }
+    }
+
+    TC_FREE(sheet);     // 析构的顺序
+    TC_FREE(sheets);
+    TC_FREE(book);
+    TC_FREE(books);
+    TC_FREE(excel);
+}
+
+void ExcelBasePrivate::construct()
+{
+    destroy();
+    excel = new QAxObject(q_ptr);
+    excel->setControl("Excel.Application");
+    excel->setProperty("Visible", false);
+    if( excel->isNull() )
+    {
+        excel->setControl("ET.Application");
+    }
+
+    if( !excel->isNull() )
+    {
+        books = excel->querySubObject("Workbooks");
+    }
+}
+
+void ExcelBasePrivate::destroy()
+{
+    TC_FREE(sheet);
+    TC_FREE(sheets);
+    if( book != nullptr && !book->isNull() )
+    {
+        book->dynamicCall("Close(Boolean)", false);
+    }
+
+    TC_FREE(book);
+    TC_FREE(books);
+    if( excel != nullptr && !excel->isNull() )
+    {
+        excel->dynamicCall("Quit()");
+    }
+
+    TC_FREE(excel);
+    filename = "";
+    sheetName = "";
+}
+
+ExcelBase::ExcelBase(QObject *parent) : QObject(parent)
+  , d_ptr(new ExcelBasePrivate(this))
+{
+
+}
+
+ExcelBase::~ExcelBase()
+{
+    close();
+    delete d_ptr;
+}
+
+// 创建一个Excel文件
+bool ExcelBase::create(const QString& filename)
+{
+    bool ret = false;
+
+    Q_D(ExcelBase);     // ...???
+    d->construct();
+
+    if( d->books != nullptr && !d->books->isNull() )
+    {
+        d->books->dynamicCall("Add");
+        d->book = d->excel->querySubObject("ActiveWorkBook");
+        d->sheets = d->book->querySubObject("WorkSheets");
+        currentSheet();
+        d->filename = filename;
+        ret = true;
+    }
+
+    return ret;
+}
+
+// 打开一个Excel文件
+bool ExcelBase::open(const QString& filename)
+{
+    bool ret = false;
+
+    Q_D(ExcelBase);
+    d->construct();
+    if( d->books != nullptr && !d->books->isNull() )
+    {
+        d->book = d->books->querySubObject("Open(QString, QVariant)", filename, 0);
+        ret = d->book != nullptr && !d->book->isNull();
+        if( ret )
+        {
+            d->sheets = d->book->querySubObject("WorkSheets");
+            d->filename = filename;
+            currentSheet();
+        }
+    }
+
+    return ret;
+}
+
+// 另存Excel文件
+void ExcelBase::saveAs(const QString& filename)
+{
+    Q_D(ExcelBase);
+    if( d->book != nullptr && !d->book->isNull() )
+    {
+        d->filename = filename;
+        QString strPath = d->filename;
+        strPath = strPath.replace('/', '\\');
+        qDebug() << strPath;
+        d->book->dynamicCall("SaveAs(const QString&,int,const QString&,const QString&,bool,bool)", strPath
+                             ,56,QString(""),QString(""),false,false);
+    }
+}
+
+void ExcelBase::save()
+{
+    Q_D(ExcelBase);
+    if( d->filename.isEmpty() )
+        return;
+
+    saveAs(d->filename);
+}
+
+// 关闭Excel文件
+void ExcelBase::close()
+{
+    Q_D(ExcelBase);
+    d->destroy();
+}
+
+// 踢出当前打开的Excel，放弃此对象对该Excel的控制权，Excel文件仍打开状态，但丧失了控制权
+void ExcelBase::kick()
+{
+    Q_D(ExcelBase);
+
+    if( d->excel != nullptr && !d->excel->isNull() )
+    {
+        d->excel->setProperty("Visible", true);
+    }
+
+    TC_FREE(d->sheet);
+    TC_FREE(d->sheets);
+    TC_FREE(d->book);
+    TC_FREE(d->books);
+    TC_FREE(d->excel);
+    d->destroy();
+}
+
+// 返回当前打开的Excel全部Sheet名
+QStringList ExcelBase::sheetNames()
+{
+    QStringList ret;
+
+    Q_D(ExcelBase);
+    if( d->sheets != nullptr && !d->sheets->isNull() )
+    {
+        int sheetCount = d->sheets->property("Count").toInt();
+        for(int i=1; i<=sheetCount; i++)
+        {
+            QAxObject* sheet = d->sheets->querySubObject("Item(int)", i);
+            if( nullptr == sheet || sheet->isNull() )
+                continue;
+            ret.append(sheet->property("Name").toString());
+            delete sheet;
+        }
+    }
+
+    return ret;
+}
+
+// 当前打开的Excel的sheet名
+QString ExcelBase::currentSheetName()
+{
+    Q_D(ExcelBase);
+    return d->sheetName;
+}
+
+// 设置当前打开的Excel是否可见
+void ExcelBase::setVisible(bool value)
+{
+    Q_D(ExcelBase);
+    if( d->excel != nullptr && !d->excel->isNull() )
+    {
+        d->excel->setProperty("Visible", value);
+    }
+}
+
+// 设置Excel文档的标题
+void ExcelBase::setCaption(const QString& value)
+{
+    Q_D(ExcelBase);
+    if( d->excel != nullptr && !d->excel->isNull() )
+    {
+        d->excel->setProperty("Caption", value);
+    }
+}
+
+// 新建一本Excel文档
+bool ExcelBase::addBook()
+{
+    bool ret = false;
+
+    Q_D(ExcelBase);
+    if( d->excel != nullptr && !d->excel->isNull() )
+    {
+        TC_FREE(d->sheet);
+        TC_FREE(d->sheets);
+        TC_FREE(d->book);
+        TC_FREE(d->books);
+        d->books = d->excel->querySubObject("WorkBooks");
+        ret = d->books != nullptr && !d->books->isNull();
+    }
+
+    return ret;
+}
+
+// 返回当前sheet
+bool ExcelBase::currentSheet()
+{
+    bool ret = false;
+
+    Q_D(ExcelBase);
+    TC_FREE(d->sheet);
+    if( d->excel != nullptr && !d->excel->isNull() )
+    {
+        TC_FREE(d->sheet);
+        d->sheet = d->excel->querySubObject("ActiveWorkBook");
+        ret = d->sheet != nullptr && !d->sheet->isNull();
+        d->sheetName = ret ? d->sheet->property("Name").toString() : "";
+    }
+
+    return ret;
+}
+
+// 设置并指定当前sheet, 当前sheet索引：从1开始
+bool ExcelBase::setCurrentSheet(int index)
+{
+    bool ret = false;
+
+    Q_D(ExcelBase);
+    if( d->sheets != nullptr && !d->sheets->isNull() )
+    {
+        TC_FREE(d->sheet);
+        d->sheet = d->sheets->querySubObject("Item(int)", index);
+        ret = d->sheet != nullptr && !d->sheet->isNull();
+        if( ret )
+        {
+            d->sheet->dynamicCall("Activate(void)");
+        }
+        d->sheetName = ret ? d->sheet->property("Name").toString() : "";
+    }
+
+    return ret;
+}
+
+// 返回当前Excel的Sheet数量
+int ExcelBase::sheetCount()
+{
+    int ret = 0;
+
+    Q_D(ExcelBase);
+    if( d->sheets != nullptr && !d->sheet->isNull() )
+    {
+        ret = d->sheets->property("Count").toInt();
+    }
+
+    return ret;
+}
+
+void ExcelBase::cellFormat(int row, int col, const QString& format)
+{
+    Q_D(ExcelBase);
+    if( d->sheet != nullptr && !d->sheet->isNull() )
+    {
+        QAxObject* range = d->sheet->querySubObject("Cells(int, int)", row, col);
+        range->setProperty("NumberFormatLocal", format);
+    }
+}
+
+void ExcelBase::cellAlign(int row, int col, Alignment hAlign, Alignment vAlign)
+{
+    Q_D(ExcelBase);
+    if( d->sheet != nullptr && !d->sheet->isNull() )
+    {
+        QAxObject* range = d->sheet->querySubObject("Cells(int, int)", row, col);
+        range->setProperty("HorizontalAlignment", hAlign);
+        range->setProperty("VerticalAlignment", vAlign);
+        delete range;
+    }
+}
+
+// 读取单元格的内容：row行从1开始，col列从1开始，返回指定单元格的内容
+QVariant ExcelBase::read(int row, int col)
+{
+    QVariant ret;
+
+    Q_D(ExcelBase);
+    if( d->sheet != nullptr && !d->sheet->isNull() )
+    {
+        QAxObject* range = d->sheet->querySubObject("Cells(int, int)", row, col);
+        // ret = range->property("Value");
+        ret = range->dynamicCall("Value()");
+        delete range;
+    }
+
+    return ret;
+}
+
+
+// 写入单元格sheet的内容：row行从1开始，col列从1开始，value准备写入的内容
+void ExcelBase::write(int row, int col, QVariant& value)
+{
+    Q_D(ExcelBase);
+    if( d->sheet != nullptr && !d->sheet->isNull() )
+    {
+        QAxObject* range = d->sheet->querySubObject("Cells(int, int)", row, col);
+        range->setProperty("Value", value);
+        delete range;
+    }
+}
+
+
+
+// 获取有效区域信息
+// rowStart() const
+// rowEnd() const
+// colStart() const
+// colEnd() const
+bool ExcelBase::usedRange(int& rowStart, int& colStart, int& rowEnd, int& colEnd)
+{
+    bool ret = false;
+
+    Q_D(ExcelBase);
+    if( d->sheet != nullptr && !d->sheet->isNull() )
+    {
+        QAxObject* urange = d->sheet->querySubObject("UsedRange");
+        rowStart = urange->property("Row").toInt();
+        colStart = urange->property("Column").toInt();
+        rowEnd = urange->querySubObject("Rows")->property("Count").toInt();
+        colEnd = urange->querySubObject("Columns")->property("Counts").toInt();
+        delete urange;
+        ret = true;
+    }
+
+    return ret;
+}
+
+// 读取整个sheet return
+QVariant ExcelBase::readAll()
+{
+    QVariant var;
+
+    Q_D(ExcelBase);
+    if( d->sheet != nullptr && !d->sheet->isNull() )
+    {
+        QAxObject* usedRange = d->sheet->querySubObject("UsedRange");
+        if( nullptr == usedRange || usedRange->isNull() )
+        {
+            return var;
+        }
+
+        var = usedRange->dynamicCall("Value");
+        delete usedRange;
+    }
+
+    return var;
+}
+
+// 读取整个sheet的数据，并放置到cells中，
+void ExcelBase::readAll(QList< QList<QVariant> >& cells )
+{
+    castVariant2ListListVariant(readAll(), cells);  // 把QVariant写到cells中
+}
+
+// 写入一个表格内容，param cells，成功写入返回true
+bool ExcelBase::writeCurrentSheet(const QList< QList<QVariant> >& cells)
+{
+    Q_D(ExcelBase);
+    if( cells.size() <= 0 )
+        return false;
+    if( nullptr == d->sheet || d->sheet->isNull() )
+        return false;
+
+    int row = cells.size();
+    int col = cells.at(0).size();
+    QString rangStr;
+    convertToColName(col, rangStr);
+    rangStr += QString::number(row);
+    rangStr = "A1:" + rangStr;
+    qDebug() << rangStr;
+    QAxObject* range = d->sheet->querySubObject("Range(const QString&)", rangStr);
+
+    if( nullptr == range || range->isNull() )
+        return false;
+
+    bool succ = false;
+    QVariant var;
+    castListListVariant2Variant(cells, var);
+    succ = range->setProperty("Value", var);
+    delete range;
+    return succ;
+}
+
+// 把列数转换为excel的字母列号，data 大于0的数，字母列号：如1->A 26->Z 27->AA
+void ExcelBase::convertToColName(int data, QString& res)
+{
+    Q_ASSERT(data > 0 && data < 65535);
+    int tempData = data / 26;
+    if( tempData > 0 )
+    {
+        int mode = data % 26;
+        convertToColName(mode, res);
+        convertToColName(tempData, res);
+    }
+    else
+    {
+        res = (to26AlpabetString(data) + res);
+    }
+}
+
+// 数字转换为26字母 1->A 26->Z
+QString ExcelBase::to26AlpabetString(int data)
+{
+    QChar ch = data + 0x40; // A对应于0x41
+    return QString(ch);
+}
+
+// QList< QList<QVariant> > cells 转换为 QVariant res
+void ExcelBase::castListListVariant2Variant(const QList< QList<QVariant> >& cells, QVariant& res)
+{
+    QVariantList vars;
+    const int rows = cells.size();
+    for(int i=0; i<rows; i++)
+    {
+        vars.append(QVariant(cells[i]));
+    }
+
+    res = QVariant(vars);
+}
+
+// 把QVariant var 转换为 QList< QList<QVariant> >& res,放在res中
+void ExcelBase::castVariant2ListListVariant(const QVariant& var, QList< QList<QVariant> >& res)
+{
+    QVariantList varRows = var.toList();
+    if( varRows.isEmpty() )
+        return;
+
+    const int rowCount = varRows.size();
+    QVariantList rowData;
+    for(int i=0; i<rowCount; i++)
+    {
+        rowData = varRows[i].toList();
+        res.push_back(rowData);
+    }
+}
+
+
+
+#ifndef MAINWINDOW_H
+#define MAINWINDOW_H
+
+#include <QMainWindow>
+#include <QString>
+#include <QMenuBar>
+#include <QAction>
+#include <QKeySequence>     // 设置QAction的快捷键
+#include <QPalette>         // 设置文本编辑区的画笔格式等
+#include <QFileDialog>
+#include <QCloseEvent>      // 重写关闭事件
+#include "AppConfig.h"
+#include <QTableView>
+#include "QVariantListListModel.h"
+#include <QScopedPointer>
+#include <QList>
+#include <QVariant>
+#include "ExcelBase.h"
+#include "SelectStandard.h"
+#include "DbcLineSplit.h"
+
+
+class MainWindow : public QMainWindow
+{
+    Q_OBJECT
+
+private:
+    QString m_filePath;         // 文件路径
+    QString m_fileName;         // 文件名
+    QTableView m_tableView;
+    SelectStandard m_standard;  // 筛选标准
+    DbcLineSplit m_split;       // 调用具体的dbc消息解析函数
+    QScopedPointer<ExcelBase> m_xls;
+    QList< QList<QVariant> > m_datas;
+
+    // QVector<int> m_modifyBit;   // 记录要修改的bit位
+
+    MainWindow();       // 二阶构造
+    bool construct();
+    MainWindow(const MainWindow& );
+    MainWindow& operator = (const MainWindow& );
+
+    bool initMenuBar();
+    bool initTableView();
+    bool initFileMenu(QMenuBar* mb);
+    bool initEditMenu(QMenuBar* mb);
+    bool initSetupMenu(QMenuBar* mb);
+    bool initHelpMenu(QMenuBar* mb);
+
+    bool makeAction(QAction*& action, QWidget* parent, QString text, int key);  // 堆空间中申请菜单项并设置父组件，快捷键等
+
+    void showErrorMessage(QString messge);
+    int showQueryMessage(QString message);
+
+protected:
+    void closeEvent(QCloseEvent* e);    // 重写关闭事件，保存配置属性
+private slots:
+    void onFileOpen();
+    void onFileExit();
+    void onCanToSig();
+    void onSigToCan();
+    void onTo_DBC();
+    void onTo_Excel();
+    void onAboutVersion();
+
+public:
+    static MainWindow* NewInstance();
+    void openFileToView();
+    ~MainWindow();
+};
+
+#endif // MAINWINDOW_H
+
+
+
+#include "Mainwindow.h"
+#include <QMessageBox>
+#include <QFileDialog>
+#include <QStringList>
+#include <QElapsedTimer>
+#include "AboutDialog.h"
+#include <QFileInfo>
+#include <QFile>
+#include <QTextStream>
+#include "OutputCases.h"
+
+#include <QDebug>
+
+void MainWindow::onFileOpen()
+{
+    m_fileName = QFileDialog::getOpenFileName(this, QString(), QString(), "excel(*.xls *.xlsx;;dbc(*.dbc)");  // 显示对话框，获取文件名
+
+    if( m_fileName == "" )
+        return;
+
+    // 显示文件路径
+    QFileInfo fi(m_fileName);       // 以文件名初始化QFileInfo对象
+
+    m_filePath = fi.absoluteFilePath();    // 通过QFileInfo对象，获取文件的绝对路径
+
+    int r = showQueryMessage(QString("Do you want to Analysis this file? \nWhich is located at: \n") + m_filePath);
+
+    if( r == QMessageBox::No )
+        return;
+
+    if( m_fileName.isEmpty() )
+        return;
+
+    openFileToView();
+}
+
+
+void MainWindow::onFileExit()
+{
+    close();
+}
+
+void MainWindow::onSigToCan()
+{
+    OutputCases oca(this);
+}
+
+void MainWindow::onCanToSig()
+{
+
+}
+
+void MainWindow::onTo_Excel()
+{
+    QString xlsFile = QFileDialog::getExistingDirectory(this);  // 选中的一个目录
+    if(xlsFile.isEmpty())
+        return;
+    xlsFile += "/new_dbc.xls";
+
+    // 创建excel
+    if(m_xls.isNull())
+        m_xls.reset(new ExcelBase);
+    m_xls->create(xlsFile);
+
+    QList< QList<QVariant> > m_datas = this->m_datas;
+
+    m_xls->setCurrentSheet(1);
+
+    m_xls->writeCurrentSheet(m_datas);  // 写数据
+
+    m_xls->save();
+}
+
+void MainWindow::onTo_DBC()
+{
+
+}
+
+void MainWindow::onAboutVersion()
+{
+    AboutDialog dlg;
+
+    dlg.exec();
+}
+
+void MainWindow::showErrorMessage(QString messge)
+{
+    QMessageBox msg(this);
+
+    msg.setWindowTitle("Error");
+    msg.setText(messge);
+    msg.setIcon(QMessageBox::Critical);
+    msg.setStandardButtons(QMessageBox::Ok);
+
+    msg.exec();
+}
+
+int MainWindow::showQueryMessage(QString message)
+{
+    QMessageBox msg(this);
+
+    msg.setWindowTitle("Query");
+    msg.setText(message);
+    msg.setIcon(QMessageBox::Question);
+    msg.setStandardButtons(QMessageBox::Yes | QMessageBox::No);   // 并列按钮的情况用 | 来操作。
+
+    return msg.exec();  // 根据返回值来作出不同的操作响应
+}
+
+
+//　重写事件
+void MainWindow::closeEvent(QCloseEvent* e)   // 重写关闭事件，保存配置属性
+{
+    AppConfig config(pos(), size());
+
+    config.store();
+
+    QMainWindow::closeEvent(e);
+}
+
+void MainWindow::openFileToView()
+{
+    if( m_fileName.endsWith("xlsx") || m_fileName.endsWith("xls") )
+    {
+        m_datas.clear();
+
+        // 创建或打开一个excel文件
+        if( m_xls.isNull() )
+            m_xls.reset(new ExcelBase);
+
+        m_xls->open(m_fileName);
+
+        // 选定显示的sheet（此时下标对应从0开始的），看哪个sheet名字是“Matrix”
+        int sheet = m_standard.selectSheet(m_xls->sheetNames());
+
+        m_xls->setCurrentSheet(sheet+1);  // 设置当前读取的sheet，
+        m_xls->readAll(m_datas);          // 读取结束之后，m_datas就是一个QList< QList<QVariant> >对象
+
+        // 保存选择的行列
+        m_standard.saveSelectCol(m_datas);
+
+        m_datas.removeAt(0);
+
+        // 此处的问题在于removeAt(i)之后链表的状态就变了，所以每次要删除的列的位置也在变
+        int colSize = m_datas.at(0).size();
+        for(int row=0; row<m_datas.size(); row++)
+        {
+            int mobileLen = 0;
+            for(int col=0; col<colSize; col++)
+            {
+                if( !m_standard.selectedCol(col) )
+                {
+                    m_datas[row].removeAt(col-mobileLen);
+                    mobileLen++;
+                }
+            }
+        }
+
+        // 获取和m_tableView关联的模型，更新模型里的数据
+        QVariantListListModel* md = qobject_cast<QVariantListListModel*>(m_tableView.model());
+        if( md )
+        {
+            md->updateData();   // 更新数据的范围
+        }
+    }
+    else    // 读取dbc文件
+    {
+        m_datas.clear();        // 打开其他文件的时候清空要显示的数据
+
+        QFile file(m_filePath);
+        QStringList strList;    // 文件里的所有字符串
+
+        // 将dbc文件里的内容读取到stringList
+        if( file.open(QIODevice::ReadOnly | QIODevice::Text) )
+        {
+            QTextStream in(&file);
+
+            while( !in.atEnd() )
+            {
+                QString str = in.readLine();
+
+                strList.push_back(str);
+            }
+
+            file.close();
+        }
+
+        QList<QVariant> varList;   // 每一行的QVariant链表
+
+        // 添加筛选的标题
+        for(int i=0; i<m_standard.standardVec().length(); i++)
+        {
+            varList.push_back(QVariant(m_standard.standardVec()[i]));
+        }
+        m_datas.append(varList);
+
+        QString tempMsgID = "";     // 一个报文ID有好多条消息，隔几行MsgID就变了，放在循环外面
+        for(int i=0; i<strList.length(); i++)
+        {
+            varList.clear();
+
+            if( strList[i].startsWith("BO_")  )
+            {
+                tempMsgID = m_split.bo_split(strList[i]);  // 取MsgId
+            }
+
+            if( strList[i].startsWith(" SG_") )
+            {
+                QList<QString> list = m_split.sg_split(strList[i]);
+
+                varList.append(QVariant(tempMsgID));
+                for(int i=0; i<list.length(); i++)
+                {
+                    varList.append(QVariant(list[i]));
+                }
+
+                varList.append(QVariant(" "));    // 两个标记还在后面没得到，记为空先
+                varList.append(QVariant(" "));
+            }
+
+            if( !varList.empty() )          // 此时QVariantList不为空才需要加到数据中
+                m_datas.append(varList);
+
+            if( strList[i].startsWith("BA_ \"GenMsgCycleTime\"") )
+            {
+                QString msgid = "";
+                QString msgCycle = m_split.ba_split(strList[i], msgid);
+
+                for(int row=1; row<m_datas.length(); row++)
+                {
+                    if( m_datas[row][0].toString() == msgid )
+                    {
+                        m_datas[row][COL_NUMS-2] = msgCycle;
+                    }
+                }
+            }
+
+            if( strList[i].startsWith("VAL_") )
+            {
+                QString signame = "";
+                QString valDescript = m_split.val_split(strList[i], signame);
+
+                for(int row=1; row<m_datas.length(); row++)
+                {
+                    if( m_datas[row][1].toString() == signame )
+                    {
+                        m_datas[row][COL_NUMS-1] = valDescript;
+                        break;  // 一一对应的，所以找到了就可以跳出循环
+                    }
+                }
+            }
+        }
+
+        QVariantListListModel* md = qobject_cast<QVariantListListModel*>(m_tableView.model());
+        if( md )
+        {
+            md->updateData();
+        }
+    }
+}
+
+
+#include "Mainwindow.h"
+
+MainWindow::MainWindow() : m_tableView(this)
+{
+    m_filePath = "";
+    m_fileName = "";
+}
+
+MainWindow::~MainWindow()
+{
+
+}
+
+bool MainWindow::construct()
+{
+    bool ret = true;
+    AppConfig config(this);
+
+    ret = ret && initMenuBar();
+    ret = ret && initTableView();
+
+    if( config.isValid() )
+    {
+        resize(config.mainWindowSize());
+        move(config.mainWindowPoint());
+    }
+    else
+    {
+        ret = false;
+    }
+
+    return ret;
+}
+
+MainWindow* MainWindow::NewInstance()
+{
+    MainWindow* ret = new MainWindow();
+
+    if( ret == nullptr || !(ret->construct()) )
+    {
+        delete ret;
+        ret = nullptr;
+    }
+
+    return ret;
+}
+
+bool MainWindow::initMenuBar()     // 初始化菜单栏和文本编辑区
+{
+    bool ret = true;
+
+    QMenuBar* mb = menuBar();   // 从堆空间中申请一个菜单栏
+
+    ret = ret && initFileMenu(mb);
+    ret = ret && initEditMenu(mb);
+    ret = ret && initSetupMenu(mb);
+    ret = ret && initHelpMenu(mb);
+
+    return ret;
+}
+
+bool MainWindow:: initTableView()
+{
+    bool ret = true;
+
+    setCentralWidget(&m_tableView);
+
+    QVariantListListModel* md = new QVariantListListModel(this);
+
+    m_tableView.setModel(md);     // view和model 视图和表格关联!!!
+
+    md->setVariantListListPtr(&m_datas);
+
+    return ret;
+}
+
+bool MainWindow::initFileMenu(QMenuBar* mb)    // 初始化文件菜单组
+{
+    QMenu* menu = new QMenu("File(&F)", mb);
+    bool ret = (menu != nullptr);
+
+    if( ret )
+    {
+        QAction* action = nullptr;
+
+        ret = ret && makeAction(action, menu, "Open(&O)", Qt::CTRL + Qt::Key_O);
+
+        if( ret )
+        {
+            connect(action, SIGNAL(triggered()), this, SLOT(onFileOpen()));
+            menu->addAction(action);
+        }
+
+        menu->addSeparator();
+
+        ret = ret && makeAction(action, menu, "Exit(&X)", 0);
+
+        if( ret )
+        {
+            connect(action, SIGNAL(triggered()), this, SLOT(onFileExit()));
+            menu->addAction(action);
+        }
+    }
+
+    if( ret )
+    {
+        mb->addMenu(menu);
+    }
+    else
+    {
+        delete menu;
+    }
+
+
+    return ret;
+}
+
+bool MainWindow::initEditMenu(QMenuBar* mb)
+{
+    QMenu* menu = new QMenu("Edit(&E)", mb);
+    bool ret = (menu != nullptr);
+
+    if( ret )
+    {
+        QAction* action = nullptr;
+
+        ret = ret && makeAction(action, menu, "Sig -> Can", 0);
+
+        if( ret )
+        {
+            connect(action, SIGNAL(triggered()), this, SLOT(onSigToCan()));
+            menu->addAction(action);
+        }
+
+        menu->addSeparator();
+
+        ret = ret && makeAction(action, menu, "Can -> Sig", 0);
+
+        if( ret )
+        {
+            connect(action, SIGNAL(triggered()), this, SLOT(onCanToSig()));
+            menu->addAction(action);
+        }
+    }
+
+    if( ret )
+    {
+        mb->addMenu(menu);
+    }
+    else
+    {
+        delete menu;
+    }
+
+    return ret;
+}
+
+bool MainWindow::initSetupMenu(QMenuBar* mb)
+{
+    QMenu* menu = new QMenu("Setup(&T)", mb);
+    bool ret = (menu != nullptr);
+
+    if( ret )
+    {
+        QAction* action = nullptr;
+
+        ret = ret && makeAction(action, menu, "To_Excel", 0);   // 父子关系，子类指定父亲setParent，加入一个指向父亲的指针；
+                                                                // 同时，父类也要把子类加入自己的子对象指针链表addAction
+
+        if( ret )
+        {
+            connect(action, SIGNAL(triggered()), this, SLOT(onTo_Excel()));
+            menu->addAction(action);
+        }
+
+        menu->addSeparator();
+
+        ret = ret && makeAction(action, menu, "To_DBC", 0);
+
+        if( ret )
+        {
+            connect(action, SIGNAL(triggered()), this, SLOT(onTo_DBC()));
+            menu->addAction(action);
+        }
+    }
+
+    if( ret )
+    {
+        mb->addMenu(menu);
+    }
+    else
+    {
+        delete menu;
+    }
+
+    return ret;
+}
+
+bool MainWindow::initHelpMenu(QMenuBar* mb)
+{
+    bool ret = true;
+
+    QMenu* menu = new QMenu("Help(&H)", mb);
+
+    ret = (menu != nullptr);
+
+    if( ret )
+    {
+        QAction* action = nullptr;
+
+        ret = ret && makeAction(action, this, "About(&A)", 0);
+
+        if( ret )
+        {
+            connect(action, SIGNAL(triggered()), this, SLOT(onAboutVersion()));
+
+            menu->addAction(action);
+        }
+    }
+
+    if( ret )
+    {
+        mb->addMenu(menu);
+    }
+    else
+    {
+        delete menu;
+    }
+
+    return ret;
+}
+
+bool MainWindow::makeAction(QAction*& action, QWidget* parent, QString text, int key)
+{
+    bool ret = true;
+
+    action = new QAction(text, parent);
+
+    if( action != nullptr )
+    {
+        action->setShortcut(QKeySequence(key));
+    }
+    else
+    {
+        ret = false;
+    }
+
+    return ret;
+}
+
+
+
+
+
+
+#ifndef QVARIANTLISTLISTMODEL_H
+#define QVARIANTLISTLISTMODEL_H
+
+#include <QAbstractTableModel>
+#include <QList>
+#include <QVector>
+///
+/// \brief 用于显示Qvariant list list的model
+/// Qvariant list list指代这个Qvariant list的元素也是Qvariant list，包含关系为
+/// Qvariant list[Qvariant list]
+///
+class QVariantListListModel : public QAbstractTableModel
+{
+    Q_OBJECT
+
+public:
+    explicit QVariantListListModel(QObject *parent = nullptr);
+
+    // Header:
+    QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
+
+    // Basic functionality:
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    void setVariantListListPtr(QList<QList<QVariant> >* ptr);
+    void updateData();
+private:
+    QList<QList<QVariant> >* m_varListList;
+    //QVariantList* m_varListList;
+    int m_rowCount;///< 行数
+    int m_columnCount;///< 列数
+};
+
+#endif // QVARIANTLISTLISTMODEL_H
+
+
+
+#include "QVariantListListModel.h"
+
+QVariantListListModel::QVariantListListModel(QObject *parent)
+    : QAbstractTableModel(parent)
+    ,m_varListList(nullptr)
+{
+}
+
+QVariant QVariantListListModel::headerData(int section, Qt::Orientation orientation, int role) const
+{
+    if(Qt::DisplayRole == role)
+    {
+        if(Qt::Horizontal == orientation)
+        {
+            return section + 1;
+        }
+        return section + 1;
+    }
+    return QVariant();
+}
+
+int QVariantListListModel::rowCount(const QModelIndex &parent) const
+{
+    Q_UNUSED(parent)
+    return m_rowCount;
+    // FIXME: Implement me!
+}
+
+int QVariantListListModel::columnCount(const QModelIndex &parent) const
+{
+    Q_UNUSED(parent)
+    return m_columnCount;
+    // FIXME: Implement me!
+}
+
+QVariant QVariantListListModel::data(const QModelIndex &index, int role) const
+{
+    if (!index.isValid())
+        return QVariant();
+    if(nullptr == m_varListList)
+        return QVariant();
+    if(Qt::DisplayRole == role)
+    {
+        const int row = index.row();
+        const int col = index.column();
+        if(row >= m_varListList->size())
+            return QVariant();
+        const int colSize = m_varListList->at(row).size();
+        if(col >= colSize)
+            return QVariant();
+        return m_varListList->at(row).at(col);
+    }
+    return QVariant();
+}
+
+void QVariantListListModel::setVariantListListPtr(QList<QList<QVariant> > *ptr)
+{
+    if(nullptr == ptr)
+        return;
+    m_varListList = ptr;
+    updateData();
+}
+
+void QVariantListListModel::updateData()
+{
+    beginResetModel();
+    m_rowCount = m_varListList->size();
+    m_columnCount = 0;
+    int colSize=0;
+    for(int i=0;i<m_rowCount;++i)
+    {
+        colSize = m_varListList->at(i).size();
+        if(colSize > m_columnCount)
+        {
+            m_columnCount = colSize;
+        }
+    }
+    endResetModel();
+}
+
+#ifndef SELECTSTANDARD_H
+#define SELECTSTANDARD_H
+
+#include <QString>
+#include <QVector>
+#include <QList>
+#include <QVariant>
+#include <QAxObject>
+#include <QStringList>
+
+#define COL_NUMS 12
+
+class SelectStandard
+{
+public:
+    QVector<QString> strVec;
+    QVector<int> indexToDisplay;
+
+    // 确定字符串是不是要显示的，参数是第一行的数据
+    bool needToDisplay(QString text);
+
+    // 保存列到数组中，参数是转换后的QList< QList<QVariant>
+    void saveSelectCol(QList< QList<QVariant> >& m_QVarRet );
+
+    // 选择读取的sheet，参数是所有sheet名
+    int selectSheet(QStringList sheetNames);
+    // 确定是不是要显示的列
+    bool selectedCol(int index);
+
+public:
+    SelectStandard();
+};
+
+#endif // SELECTSTANDARD_H
+
+
+#include "SelectStandard.h"
+
+
+SelectStandard::SelectStandard()
+{
+    strVec.push_back("Signal Name");
+    strVec.push_back("Msg ID");
+    strVec.push_back("GenMsgCycleTime");
+    strVec.push_back("Start Bit");
+    strVec.push_back("Signal Length (Bit)");
+    strVec.push_back("Byte Order");
+    strVec.push_back("Date Type");
+    strVec.push_back("Resolution");
+    strVec.push_back("Offset");
+    strVec.push_back("Signal Min. Value");
+    strVec.push_back("Signal Max. Value");
+    strVec.push_back("Signal Value Description");
+
+}
+
+// 选择sheet
+int SelectStandard::selectSheet(QStringList sheetNames)
+{
+    int selectSheet = 0;
+    for(int i=1; i<=sheetNames.size(); i++)     // 从1 还是0开始
+    {
+        if( sheetNames[i] == "Matrix" )
+        {
+            selectSheet = i;
+            break;
+        }
+    }
+
+    return selectSheet;
+}
+
+// 保存要显示的列
+void SelectStandard::saveSelectCol(QList< QList<QVariant> >& m_QVarRet )
+{
+    for(int j=0; j<m_QVarRet[1].size(); j++)
+    {
+        if( needToDisplay(m_QVarRet[1][j].toString()) )
+        {
+            if( indexToDisplay.length() < COL_NUMS )
+            {
+                indexToDisplay.push_back(j);    // 一共要筛选的标识是12个，最后有一个同样是以...开始的快速周期，删除掉
+            }
+            else
+            {
+                break;
+            }
+        }
+    }
+}
+
+// 判断是不是选中的列
+bool SelectStandard::selectedCol(int index)
+{
+    bool ret = false;
+
+    for(int i=0; i<indexToDisplay.length(); i++)
+    {
+        if( index == indexToDisplay[i] )
+        {
+            ret = true;
+            break;
+        }
+    }
+
+    return ret;
+}
+
+bool SelectStandard::needToDisplay(QString text)
+{
+    bool ret = false;
+
+    for(int i=0; i<strVec.length(); i++)
+    {
+        if( text.startsWith(strVec[i]) )
+        {
+            ret = true;
+            break;
+        }
+    }
+
+    return ret;
+}
+
+#ifndef DBCLINESPLIT_H
+#define DBCLINESPLIT_H
+
+#include <QString>
+#include <QList>
+#include <QObject>
+
+class DbcLineSplit : public QObject
+{
+    Q_OBJECT
+public:
+    DbcLineSplit();
+
+    QString bo_split(QString src);          // 分离得到MsgID
+    QList<QString> sg_split(QString src);   // 分离得到：SG_Name, start bit, signal length, byte order, data type, resolution, offset, minVal, maxVal
+    QString ba_split(QString src, QString& msgid);          // 分离得到：GenMsgCycleTime，要根据 B0_ 485 确定是填到哪个周期中
+    QString val_split(QString src, QString& signame);         // 分离得到 val Discription, 要根据详细的信号名，筛选后续的内容。
+
+    ~DbcLineSplit();
+};
+
+
+#include "DbcLineSplit.h"
+#include <QDebug>
+
+DbcLineSplit::DbcLineSplit()
+{
+
+}
+
+QString DbcLineSplit::bo_split(QString src)          // h前面的3个字符   BO_ 241 BCM_0F1h: 8 BCM
+{
+    QString ret = "";
+
+    int index = src.indexOf('h');
+
+    ret = src.mid(index-3, 3);
+
+    ret.prepend("0x");
+
+    return ret;
+}
+
+// 分离得到：SG_Name, start bit, signal length, byte order, data type, resolution, offset, minVal, maxVal
+QList<QString> DbcLineSplit::sg_split(QString src)   //  SG_ BCMStatus : 2|3@0+ (1,0) [0|7] "" Vector__XXX( SG_前面有1空格)
+{
+    QList<QString> ret;
+
+    QString tempStr = "";
+    int index = 0;
+
+    // Sig Name
+    src = src.mid(5);
+    index = src.indexOf(':');
+    tempStr = src.left(index);
+    tempStr = tempStr.trimmed();
+    ret.push_back(tempStr);
+
+    // start bit
+    src = src.mid(index + 2);
+    index = src.indexOf('|');
+    tempStr = src.left(index);
+    ret.push_back(tempStr);
+
+    // signal length
+    src = src.mid(index+1);
+    index = src.indexOf('@');
+    tempStr = src.left(index);
+    ret.push_back(tempStr);
+
+    // byte order
+    src = src.mid(index+1);
+    if( src[0] == '0' )
+    {
+        tempStr = "Motorola";
+    }
+    else if( src[0] == '1' )
+    {
+        tempStr = "Intel";
+    }
+    ret.push_back(tempStr);
+
+    // data type
+    if( src[1] == '+' )
+    {
+        tempStr = "Unsigned";
+    }
+    else if( src[1] == '-' )
+    {
+        tempStr = "Signed";
+    }
+    ret.push_back(tempStr);
+
+    // resolution & offset
+    index = src.indexOf('(');
+    src = src.mid(index+1);
+    index = src.indexOf(',');
+    ret.push_back(src.left(index));
+
+    src = src.mid(index+1);
+    index = src.indexOf(')');
+    ret.push_back(src.left(index));
+
+    // minVal & maxVal
+    index = src.indexOf('[');
+    src = src.mid(index+1);
+    index = src.indexOf('|');
+    ret.push_back(src.left(index));
+
+    src = src.mid(index+1);
+    index = src.indexOf(']');
+    ret.push_back(src.left(index));
+
+    return ret;
+}
+
+// 分离得到：GenMsgCycleTime，要根据 BO_ 485 确定是填到哪个周期中
+QString DbcLineSplit::ba_split(QString src, QString& msgid)     // BA_ "GenMsgCycleTime" BO_ 499 30;
+{
+    QString ret = "";
+
+    int index = src.lastIndexOf('\"');
+
+    src = src.mid(index+6);
+    index = src.indexOf(' ');
+    msgid = src.left(index);
+
+    // 把十进制的msgid转换为16进制放到字符串里
+    int id = msgid.toInt();
+    msgid = QString("%1").arg(id, 0, 16);
+    msgid = msgid.toUpper();
+    msgid.prepend("0x");
+
+    ret = src.mid(index+1);
+    ret.remove(ret.length()-1, 1);
+
+    return ret;
+}
+
+// 分离得到 val Discription, 要根据详细的信号名，筛选后续的内容。
+QString DbcLineSplit::val_split(QString src, QString& signame)   // VAL_ 497 SysPwrMd 3 "Crank" 2 "Run" 1 "ACC" 0 "Off" ;
+{
+    QString ret = "";
+
+    int index = src.indexOf(' ');
+    src = src.mid(index+1);
+    index = src.indexOf(' ');
+    src = src.mid(index+1);
+
+    index = src.indexOf(' ');
+    signame = src.left(index);
+
+    ret = src.mid(index+1);
+    ret.remove(ret.length()-1, 1);
+
+    return ret;
+}
+
+DbcLineSplit::~DbcLineSplit()
+{
+
+}
+
+
+#endif // DBCLINESPLIT_H
+
+
+
+"Msg Name
+报文名称"	"Signal Name
+信号名称"	"Msg ID
+报文标识符"	"Msg Length 
+报文长度"	"Transmit Node
+发送节点"	"Signal Send Type
+信号发送类型"	"Msg Send Type
+报文发送类型"	"GenMsgCycleTime
+报文周期时间"	"Start Bit
+起始位"	Sig MSB	Sig LSB	"Signal Length (Bit)
+信号长度"	"Byte Order
+排列格式"	"Date Type
+数据类型"	"Resolution
+精度"	"Offset
+偏移量"	"Signal Min. Value (phys)
+物理最小值"	"Signal Max. Value(phys)
+物理最大值"	"Unit
+单位"	"Signal Value Table Name
+信号值描述表名"	"Signal Value Description
+信号值描述"	Signal comment注释	"GenSigTimeoutTime
+信号超时时间"	"Signal Initial Value(Hex)
+信号初始值"	"GenSigInactiveValue(Hex)
+非使能值"	"GenMsgCycleTimeFast(ms)
+报文发送的快速周期(ms)"	"Msg Nr. Of Reption
+报文快速发送的次数"	"GenMsgDelayTime(ms)
+报文延时时间(ms)"	GenMsgFastOnStart	GenMsgILSupport	NmMessage	DiagState	"诊断请求
+DiagReq"	"诊断响应
+DiagRsp"	DiagUudResponse	TpTxIndex	GenSigTImeoutValue	GenSigSuprvRespSubValue	NmAsrMessage	Message Comment	"Msg Type
+报文类型"	"User Define Attribute
+用户自定义属性"	iBDU	LSM	HVAC	iCGM			
+iBDU_281h	SystemPowerMode	0x281	8	iBDU	Cyclic	Cyclic	20	0	1	0	2	Intel	unsigned	1	0	0	3		Vtsig_SystemPowerMode	"0: $0=Off
+1: $1=Accessory
+2: $2=Run
+3: $3=Crank Request"		60	0	0	20	0	0	0	yes	no	no	no	no		0	0		no		App			x	x	x			
+iBDU_281h	SystemPowerModeValidity	0x281	8	iBDU	Cyclic	Cyclic	20	2	2	2	1	Intel	unsigned	1	0	0	1		Vtsig_SystemPowerModeValidity	"0: Valid
+1: Invalid"		60	0	0	20	0	0	0	yes	no	no	no	no		0	0		no		App			x	x	x			
+iBDU_281h	TurnLampLeftStatus	0x281	8	iBDU	Cyclic	Cyclic	20	3	3	3	1	Intel	unsigned	1	0	0	0		Vtsig_TurnLampLeftStatus	"0: Off
+1: On"		60	0	0	20	0	0	0	yes	no	no	no	no		0	0		no		App			x		x	
+
+
+swort_offer::::
+
+// 硬件部分：根据产品需求规范，设计测试用例，在IBDU台架上对各版本进行功能测试。如对转向灯灯控模块测试，
+// 设计好测试条件、测试步骤、测试结果，在台架上对应灯控两态开关就行拨动，看测试结果是否正常。
+
+=========================1、二维数组中的查找=======================
+// 用 while循环完成查找，每次筛选掉一行或者一列！！！ 用for 逻辑会出错！
+
+class Solution {
+public:
+bool Find(int target, vector<vector<int> > array)
+{
+    bool ret = false;
+
+    int rows = static_cast<int>(array.size());
+    int cols = static_cast<int>(array[0].size());
+
+    if( rows < 0 || cols < 0 )
+        return false;
+
+    int row = 0;
+    int col = cols-1;
+
+    while( row < rows && col >=0)
+    {
+        if( array[row][col] == target )
+        {
+            ret = true;
+            break;
+        }
+        else if( array[row][col] < target )
+            row++;
+        else if( array[row][col] > target )
+            col--;
+    }
+
+    return ret;
+}
+};
+
+
+==========================2、替换空格=========================
+
+// 参数，str是一个字符数组，length是字符数组的长度，意思是该字符数组提供了替换所需要的长度
+// 思路：从后往前进行复制，防止出现字符覆盖的情况！ 统计空格数，字符数，分别从新串和老串的末尾向前复制。
+void replaceSpace(char *str,int length)
+{
+
+    if( str == nullptr || length <= 0 )
+        return;
+
+    int oldLen = 0;
+    int numberOfBlank = 0;
+
+    // 统计字符数
+    int i=0;
+    while( str[i] != '\0' )
+    {
+        oldLen++;
+
+        if( str[i] == ' ' )
+        {
+            numberOfBlank++;
+        }
+
+        i++;
+    }
+
+    int newLen = oldLen + numberOfBlank * 2;
+
+    if( newLen > length )
+        return;
+
+    int indexNew = newLen;
+    int indexOld = oldLen;
+
+    while( indexNew >= indexOld && indexOld >= 0 )
+    {
+        if( str[indexOld] != ' ' )
+        {
+            str[indexNew--] = str[indexOld--];
+        }
+        else
+        {
+            str[indexNew--] = '0';
+            str[indexNew--] = '2';
+            str[indexNew--] = '%';
+
+            indexOld--;
+        }
+    }
+}
+
+==========================3、从尾到头打印链表===================
+// 使用栈数据结构，后进先出的特性，从头遍历单链表，元素入栈，出栈的时候则是从后向前
+class Solution {
+public:
+
+    vector<int> printListFromTailToHead(ListNode* head)
+    {
+        vector<int> ret;
+
+        stack<int> m_stack;
+        
+        while( head )
+        {
+           m_stack.push(head->val);
+           
+           head = head->next;
+        }
+        
+        while( !m_stack.empty() )
+        {
+            ret.push_back(m_stack.top());
+            m_stack.pop();
+        }
+
+        return ret;
+    }
+};
+
+
+=========================4、重建二叉树===========================
+// 思路，根据中序的结果找到根节点的索引，然后将数组里的元素分别放到不同的左右子树的前序中序数组；
+// 最后递归完成左右子树重建，注意既然是递归，就一定得有边界条件！出口！！
+class Solution {
+public:
+    TreeNode* reConstructBinaryTree(vector<int> pre,vector<int> vin)    // pre:preorder vin:inorder
+    {
+        if( pre.size() == 0 || vin.size() == 0 )    // 注意，递归！！！自然要有边界条件。
+            return nullptr;
+
+        int len = static_cast<int>(vin.size());
+        vector<int> left_pre, left_in, right_pre, right_in;
+        TreeNode* root = new TreeNode(pre[0]);
+
+        // 找出根节点的索引
+        int pivot = 0;
+        for(int i=0; i<len; i++)
+        {
+            if( vin[i] == pre[0] )
+            {
+                pivot = i;
+                break;
+            }
+        }
+
+        // 将元素分为左右前序、中序数组
+        for(int i=0; i<pivot; i++)
+        {
+            left_pre.push_back(pre[i+1]);
+            left_in.push_back(vin[i]);
+        }
+
+        for(int i=pivot+1; i<len; i++)
+        {
+            right_pre.push_back(pre[i]);
+            right_in.push_back(vin[i]);
+        }
+
+        // 递归完成左右子树的重建
+        root->left = reConstructBinaryTree(left_pre, left_in);
+        root->right = reConstructBinaryTree(right_pre, right_in);
+
+        return root;
+    }
+};
+
+==========================5、两个栈实现队列======================
+// 入队列：直接在栈1中压入即可，不需要判断
+// 出队列：先判断栈2是否为空，如果是空，也就是没有队列头部元素，就把栈1的所有元素都进行压栈。
+// 由于出队列的时候会把栈1的所有元素都压入栈2，所以栈1中始终会保持没有元素的状态。入队列时直接压栈
+
+class Solution
+{
+public:
+    void push(int node) {
+
+        stack1.push(node);
+    }
+
+    int pop() {
+
+        int ret = -1;
+
+        if( stack2.size() == 0 )
+        {
+            while (stack1.size() > 0) 
+            {
+                stack2.push(stack1.top());
+                stack1.pop();
+            }
+        }
+        
+        if( stack2.size() > 0 )
+        {
+            ret = stack2.top();
+            stack2.pop();
+        }
+
+        return ret;
+    }
+
+private:
+    stack<int> stack1;  // 进队列
+    stack<int> stack2;  // 出队列
+};
+
+=========================6、旋转数组的最小数字===================
+// 该数组旋转后仍然相对是有序的，故用二分查找的方法， 用mid来保存最小值的索引
+// begin始终在前面升序数组，end始终在后面升序数组，终止条件就是档begin和end相邻的时候
+// 通过mid来不停的改变begin和end的取值，缩小遍历范围。
+// 特殊情况下如果begin end mid 这三个位置的值相同，无法判断mid到底在哪个数组,就必须顺序查找了
+
+class Solution {
+public:
+    int minNumberInRotateArray(vector<int> rotateArray) {
+
+        int len = rotateArray.size();
+
+        if( len == 0 )
+            return 0;
+
+        int begin = 0;      // begin始终在前面升序数组
+        int end = len-1;    // end始终在后面升序数组
+        int mid = 0;
+
+        while( rotateArray[begin] >= rotateArray[end] )
+        {
+            if( end - begin == 1 )
+            {
+                mid = end;
+                break;
+            }
+
+            mid = (begin + end) >> 1;
+
+            // 如果begin、end、mid、这三个位置的元素都是一样大的，只能顺序遍历数组找最小O（n）
+            if( (rotateArray[begin] == rotateArray[mid]) && (rotateArray[mid] == rotateArray[end]) )
+                return finMin(rotateArray);
+
+            if( rotateArray[begin] <= rotateArray[mid] )    // mid在前面的升序数组
+                begin = mid;
+            else if( rotateArray[mid] <= rotateArray[end] ) // mid在后面的升序数组
+                end = mid;
+
+        }
+
+        return rotateArray[mid];
+    }
+
+    int finMin(vector<int> arr)
+    {
+        if( arr.size() == 0 )
+            return 0;
+
+        int min = arr[0];
+
+        for(int i=0; i<arr.size(); i++)
+        {
+            if( arr[i] < min )
+            {
+                min = arr[i];
+            }
+        }
+
+        return min;
+    }
+};
+
+
+=========================7、斐波那契数列========================
+// 用循环来完成递归，每一次的循环变量的值要改变，参加到下一次循环中
+//　迭代则会出现内存超限的问题。
+class Solution {
+public:
+    int Fibonacci(int n)
+    {
+        int ret = 0;
+        
+        if( n == 0 || n == 1 )
+            return n;
+
+        int first = 0;
+        int second = 1;
+
+        for(int i=2; i<=n; i++)
+        {
+            ret = first + second;
+
+            first = second;
+            second = ret;
+        }
+
+        return ret;
+    }
+};
+
+
+========================8、跳台阶（斐波那契）==================================
+// 问题等同于求fibonacci第n项。跳n个台阶的跳法在于最后跳到第n级的时候是跳1步，还是跳2步
+// 关键在于写出递归模型 f(n) = 1; n == 1  f(n) == 2; n == 2		f(n) = f(n-1) + f(n-2); n >=3
+
+class Solution {
+public:
+    int jumpFloor(int number)
+    {
+        int count = -1;
+
+        if( number <= 0 )
+            return count;
+
+        if( number == 1 || number == 2 )
+            return number;
+
+        int first = 1;
+        int second = 2;
+
+        for(int i=3; i<=number; i++)
+        {
+            count = first + second;
+
+            first = second;
+            second = count;
+        }
+
+        return count;
+    }
+};
+
+====================9、青蛙一次可以跳1、2...n级台阶，问共多少跳法======
+// 思路：f(n) = 1 + f(n-1) + f(n-2) + ... + f(1);	跳n阶就等于最后跳1步、2步、n步的所有方法，
+// 递归公式如上，汇总为 2^(n-1);
+
+class Solution {
+public:
+    int jumpFloorII(int number) {
+
+        int count = -1;
+
+        if( number <= 0 )
+            return count;
+        
+        count = power(number-1);
+
+        return count;
+    }
+
+    int power(int n)
+    {
+        int ret = 1;
+
+        for(int i=1; i<=n; i++)
+            ret *= 2;
+
+        return ret;
+    }
+};
+
+
+==========================10、矩阵覆盖==========================
+// 思路：在于最后放置的时候是竖着放，还是横着放，分别对应于f(n-1)和f(n-2)方法种类；
+// 递归公式：f(n) = 1; n == 1  f(n) == 2; n == 2		f(n) = f(n-1) + f(n-2); n >=3
+class Solution {
+public:
+    int rectCover(int number)
+    {
+        int count = 0;
+
+        if( number <= 0 )
+            return count;
+
+        if( number == 1 || number == 2 )
+            return number;
+
+        int first = 1;
+        int second = 2;
+
+        for(int i=3; i<=number; i++)
+        {
+            count = first + second;
+
+            first = second;
+            second = count;
+        }
+
+        return count;
+    }
+};
+
+
+==========================11、二进制中的1的个数==================
+// 思路：1、一直右移，直到n为0；2、循环变量0x1一直左移（注意要变成unsigned），进行 & 运算
+//       3、利用 (n-1) & n ==> 将n的最右边一位1变为0；
+
+class Solution {
+public:
+     int  NumberOf1(int n) {
+         int count = 0;
+         
+         while( n )
+         {
+             count++;
+             
+             n = (n - 1) & n;    // 把最右边的一位1变为0
+         }
+         
+         return count;
+     }
+};
+
+=========================12、数值的整数次方======================
+// 思路，主要考虑到底数为0，指数为负数时不合法的情况；以及指数为0的时候值为1等情况。
+// 对于不合法的情况设置全局的bool变量进行标记；
+// 对于指数为负数的情况，对正数指数的值取倒数！
+
+class Solution {
+public:
+    bool gInvalid = false;
+    
+    double Power(double base, int exponent) 
+    {
+        if( equal(base, 0.0) && exponent < 0 )
+        {
+            gInvalid = true;
+            return 0.0;
+        }
+        
+        unsigned int absExponent = (unsigned int)exponent;
+        if( exponent < 0 )
+            absExponent = (unsigned int)(-exponent);
+        
+        double ret = PowerOfUintExponent(base, absExponent);
+        if( exponent < 0 )
+            ret = 1.0 / ret;
+        
+        return ret;
+    }
+    
+    double PowerOfUintExponent(double base, unsigned int exponent)
+    {
+        double ret = 1.0;
+        
+        if( exponent == 0 )
+            return ret;
+        
+        for(int i=0; i<exponent; i++)
+        {
+            ret *= base;
+        }
+        
+        return ret;
+    }
+    
+    bool equal(double a, double b)
+    {
+        double delta = 0.000000000000001;
+        
+        if( (b-a) > -delta && (b-a) < delta )
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+};
+
+==========================13、调整数组顺序使奇数位于偶数前面========
+// 思路，像冒泡一样从后向前交换 偶奇 元素，每一次的外层for都能确定第一个元素
+// 之后向后继续确定每个位置的元素。可以保证相对位置不变
+
+class Solution {
+public:
+    void reOrderArray(vector<int> &array) {
+        
+        int len = array.size();
+        
+        if( len == 0 )
+            return;
+    
+        //　像冒泡一样的从后向前不停交换偶奇元素
+        for(int i=0; i<len; i++)
+        {
+            for(int j=len-1; j>i; j--)
+            {
+                if( (array[j-1] & 1) == 0 && (array[j] & 1) == 1 )
+                    swap(array[j-1], array[j]);
+            }
+        }
+    }
+};
+
+==========================14、链表中倒数第k个节点=================
+// 思路，如果要得到链表的长度，就需要先遍历一次链表，O(n)
+// 倒数第k个节点，是从最后一个节点向前走k-1步，也就是第一个节点向后走n-k步，加起来刚好是从头到尾的n-1步
+// 考虑快的指针先走k-1步（此处要注意如果链表没有k个元素，也就没有倒数第k个元素）
+// 慢的指针从头同时开始走，此时快的指向最后一个元素，慢的刚好走了n-k步指向了倒数第k个
+class Solution {
+public:
+    ListNode* FindKthToTail(ListNode* pListHead, unsigned int k)
+    {
+        if( pListHead == nullptr || k == 0 )
+            return nullptr;
+
+        ListNode* pFast = pListHead;
+        ListNode* pSlow = pListHead;
+
+        for(int i=0; i<k-1; i++)      // 先移动k-1步，如果没有k个元素，也就没有倒数第k个元素了
+        {
+            if( pFast->next != nullptr )
+                pFast = pFast->next;
+            else
+                return nullptr;
+        }
+
+        while( pFast->next != nullptr )
+        {
+            pFast = pFast->next;
+            pSlow = pSlow->next;
+        }
+
+        return pSlow;
+    }
+};
+
+==========================15、反转链表===========================
+// 递归的方式进行，出口是只有一个元素或者为空的时候。
+
+class Solution {
+public:
+    ListNode* ReverseList(ListNode* pHead) {
+        
+        ListNode* ret = nullptr;
+        
+        if( pHead == nullptr || pHead->next == nullptr )    // 递归出口
+        {
+            return  pHead;
+        }
+        else 
+        {
+            ListNode* guard = pHead->next;
+            
+            ret = ReverseList(pHead->next);
+            guard->next = pHead;
+            pHead->next = nullptr;
+        }
+        
+        return  ret;
+    }
+};
+
+==========================16、合并两个排序的链表==================
+// 递归的思想进行，以一个子链表和另一个链表继续进行合并。出口是一个链表为空
+
+class Solution {
+public:
+    ListNode* Merge(ListNode* pHead1, ListNode* pHead2)
+    {
+        ListNode* ret = NULL;
+        
+        if( pHead1 == NULL )
+            ret = pHead2;
+        else if( pHead2 == NULL )
+            ret = pHead1;
+        else if( pHead1->val < pHead2->val )
+        {
+            pHead1->next = Merge(pHead1->next, pHead2);
+            ret = pHead1;
+        }
+        else
+        {
+            pHead2->next = Merge(pHead2->next, pHead1);
+            ret = pHead2;
+        }
+        
+        return ret;
+    }
+};
+
+==========================17、树B是不是树A的子结构================
+// 思路，要用两个递归来完成。doesTree1HasTree2递归的判断两个树从根节点开始的值是不是分别对应相等。
+// HasSubtree判断左树是不是包含右边的子树。如果根节点值相同了，调用doesTree1HasTree2判断孩子节点是不是相同
+// 如果不同，则判断以左右孩子为根节点的子树是否包含右边的子树，递归！
+class Solution {
+public:
+    bool HasSubtree(TreeNode* pRoot1, TreeNode* pRoot2)
+    {
+        bool ret = false;
+
+        if( pRoot1 == nullptr || pRoot2 == nullptr )
+            return false;
+        
+        if( pRoot1->val == pRoot2->val )
+            ret = doesTree1HasTree2(pRoot1, pRoot2);    // 如果根节点相同了，再判断左右孩子节点是否相等。
+        
+        if( !ret )  // 如果判断不是以该根节点的子树，继续判断以左右孩子为根节点的数是不是包含该子树
+            ret = HasSubtree(pRoot1->left, pRoot2);
+        
+        if( !ret )
+            ret = HasSubtree(pRoot1->right, pRoot2);
+        
+        return ret;
+    }
+
+    bool doesTree1HasTree2(TreeNode* pRoot1, TreeNode* pRoot2)  // 一个一个树节点进行匹配！！！
+    {
+        if( pRoot2 == nullptr )     // 子树节点遍历结束了
+            return true;
+        
+        if( pRoot1 == nullptr )     // 左树没了，子树中还有元素
+            return false;
+        
+        if( pRoot1->val != pRoot2->val )
+            return false;
+        
+        return doesTree1HasTree2(pRoot1->left, pRoot2->left)        // 递归判断左右孩子节点
+                && doesTree1HasTree2(pRoot1->right, pRoot2->right);
+    }
+};
+
+=======================18、二叉树的镜像==========================
+// 思路，注意对参数合法性的判断，根节点为空或树中只有一个节点，返回
+// 然后交换根节点左右孩子指针的指向，之后判断下左右孩子节点是否为空，（提高效率）
+// 继续对左右子树递归进行镜像！ （递归的交换！）
+
+class Solution {
+public:
+    void Mirror(TreeNode *pRoot) 
+    {
+        if( pRoot == nullptr )
+            return;
+        
+        if( pRoot->left == nullptr && pRoot->right == nullptr )
+            return;
+        
+        TreeNode* tmp = pRoot->right;   // 进行根节点左右子树的交换
+        pRoot->right = pRoot->left;
+        pRoot->left = tmp;
+        
+        if( pRoot->left )               // 然后进行左右子树 孩子子树的交换
+            Mirror(pRoot->left);
+        
+        if( pRoot->right )
+            Mirror(pRoot->right);
+    }
+};
+
+=========================19、循环打印二维矩阵====================
+// 思路，定义四个循环变量，指代上下左右四个位置，按照顺时针打印，
+// 并每一圈结束更新四个变量的值，进入下一次打印循环
+
+class Solution {
+public:
+    vector<int> printMatrix(vector<vector<int> > matrix)
+    {
+        vector<int> ret;
+
+        int rows = matrix.size();
+        int cols = matrix[0].size();
+
+        if( rows == 0 || cols == 0 )
+            return ret;
+
+        // 行从top到bottom，列从left到right
+        int top = 0, bottom = rows-1, left = 0, right = cols-1;
+
+        while( left <= right && top <= bottom )
+        {
+            // 从左到右，行
+            for(int i=left; i<=right; i++)
+                ret.push_back(matrix[top][i]);
+
+            // 从上到下，列，至少两行
+            for(int i=top+1; i<=bottom; i++)
+                ret.push_back(matrix[i][right]);
+
+            // 从右到左，行，至少两行两列
+            for(int i=right-1; i>=left && top<bottom; i--)
+                ret.push_back(matrix[bottom][i]);
+
+            // 从下到上，列，至少三行两列
+            for(int i=bottom-1; i>top && left<right; i--)
+                ret.push_back(matrix[i][left]);
+
+            left++;
+            top++;
+            right--;
+            bottom--;
+        }
+
+        return ret;
+    }
+};
+
+=========================20、包含min函数的栈=====================
+// 思路：用两个站，一个保存值，一个保存此时状态下的最小值
+class Solution {
+public:
+    stack<int> val_stack;
+    stack<int> min_stack;
+    
+    void push(int value) {
+        val_stack.push(value);
+        
+        if( min_stack.size() == 0 || min_stack.top() > value )    // 此处对于min栈中压入的值是value还是栈顶的值，是一个非此即彼的问题
+            min_stack.push(value);
+        else												      // 所以注意是if 和 else的关系！！！
+            min_stack.push(min_stack.top());
+    }
+    void pop() {
+        if( val_stack.size() > 0 && min_stack.size() > 0 )	      // 对于所有的pop top都要判断一下栈的大小
+        {
+            val_stack.pop();
+            min_stack.pop();
+        }
+    }
+    int top() {
+        if( val_stack.size() > 0 )
+            return val_stack.top();
+        
+        return -1;
+    }
+    int min() {
+        if( min_stack.size() > 0 )
+            return min_stack.top();
+        
+        return -1;
+    }
+};
+
+=========================21、栈的压入弹出序列====================
+// 思路：用一个栈来存放进栈的数据，popV作为出栈顺序，从索引0到最后依次是不同状态下的栈顶元素值
+// 如果不匹配就一直进栈，匹配了就弹出栈顶，index++去看下一个元素是不是当前状态栈的栈顶
+// 最后匹配结束，栈肯定是空的，index也移动到输出序列最后一个元素的后面位置了
+class Solution {
+public:
+    bool IsPopOrder(vector<int> pushV,vector<int> popV) {
+        
+        if( pushV.size() != popV.size() || pushV.size() <= 0 || popV.size() <= 0 )
+            return false;
+        
+        stack<int> pushStack;
+        
+        int index = 0;  // 标记popV的下标，要一直遍历到输出序列的结尾,视为匹配
+        for(int i=0; i<pushV.size(); i++)
+        {
+            pushStack.push(pushV[i]);
+            
+            while( !pushStack.empty() && pushStack.top() == popV[index] )
+            {
+                pushStack.pop();
+                index++;
+            }
+        }
+        
+        if( pushStack.empty() && index == popV.size() )
+            return true;
+        else 
+            return false;
+    }
+};
+
+
+==========================22、二叉树层次遍历=====================
+// 思路：使用队列进行操作，当弹出父节点的时候，要将他的左右孩子节点压入，当队列为空的时候，整棵树也就遍历完了
+// 遍历的时候就可以访问值输出了
+class Solution {
+public:
+    vector<int> PrintFromTopToBottom(TreeNode* root) 
+    {
+        vector<int> ret;
+        deque<TreeNode*> m_deque;
+        
+        if( root == NULL )
+            return ret;
+        
+        m_deque.push_back(root);
+        
+        while( !m_deque.empty() )
+        {
+            TreeNode* pNode = m_deque.front();
+            ret.push_back(pNode->val);
+            
+            m_deque.pop_front();
+            
+            if( pNode->left != NULL )
+                m_deque.push_back(pNode->left);
+            
+            if( pNode->right != NULL )
+                m_deque.push_back(pNode->right);
+        }
+        
+        return ret;
+    }
+};
+
+=================23、判断数组是不是二叉搜索树的后续遍历===============
+class Solution {
+public:
+    bool VerifySquenceOfBST(vector<int> sequence) 
+    {
+        int len = sequence.size();
+        
+        if( len <= 0 )
+            return false;
+        
+        int root = sequence[len-1];
+        
+        int i=0;
+        // 找左子树,同时把左子树存到一个新的vector中
+        vector<int> subLeft;
+        for( ; i<len-1; i++)
+        {
+            if( sequence[i] > root )
+                break;
+            subLeft.push_back(sequence[i]);
+        }
+        
+        
+        // 找右子树，同时把右子树存到一个新的vector中
+        vector<int> subRight;
+        for(int j = i; j<len-1; j++)
+        {
+            if( sequence[j] < root )	// 如果这时候右子树里有数比root小，说明不是二叉搜索的，false
+                return false;
+            subRight.push_back(sequence[j]);
+        }
+        
+        bool left = true;
+        // 判断左子树是不是二叉搜索的
+        if( i > 0 )
+            left = VerifySquenceOfBST(subLeft);
+        
+        bool right = true;
+        if( i < len-1 )
+            right = VerifySquenceOfBST(subRight);
+        
+        if( left && right )
+            return true;
+        else
+            return false;
+    }
+};
+
+======================24、二叉树中和为某一值的路径========================
+// 考点：回溯 + 递归 ！ （递归逻辑结束之后的最后一步代码必然是回溯 --> 删除掉最后压入的节点，回到上一步）
+// 回溯的时候，最后的节点要先被弹出去，所以要用vector来模拟栈的情况。
+// 使用vector是因为还需要把路径里的数据保存下来
+
+class Solution {    // 用vector来模拟栈的后进先出，因为要访问到栈的每个元素，压入到临时vector中
+public:
+    vector<vector<int> > FindPath(TreeNode* root,int expectNumber)
+    {
+        vector<vector<int>> ret;
+
+        if( root == NULL )
+            return ret;
+
+        vector<int> pathStack;
+        int currentNumber = 0;
+
+        FindPath(root, expectNumber, pathStack, currentNumber, ret);
+
+        return ret;
+    }
+
+    void FindPath(TreeNode* root, int expectNumber,
+                                vector<int> pathStack, int currentNumber,
+                                 vector<vector<int>>& ret)
+    {
+        currentNumber += root->val;
+        pathStack.push_back(root->val);
+
+        vector<int> tmp;
+        // 如果是叶节点，并且当前路径的和等于预计的值，就把值保存下来
+        bool isLeaf = (root->left == NULL && root->right == NULL);
+        if( currentNumber == expectNumber && isLeaf )
+        {
+            for(vector<int>::iterator it = pathStack.begin(); it != pathStack.end(); it++)
+            {
+                tmp.push_back(*it);
+            }
+
+            ret.push_back(tmp);
+        }
+
+        // 如果不是叶节点，就递归看左右孩子节点是否满足要求
+        if( root->left != NULL )
+            FindPath(root->left, expectNumber, pathStack, currentNumber, ret);
+        if( root->right != NULL )
+            FindPath(root->right, expectNumber, pathStack, currentNumber, ret);
+
+        // 最后在返回父节点时，删除掉当前栈中最后压入的节点 // 回溯
+        pathStack.pop_back();
+    }
+
+
+};
+
+======================25、复杂链表的复制=========================
+class Solution {
+public:
+    RandomListNode* Clone(RandomListNode* pHead)
+    {
+        ClonedNodes(pHead);
+
+        connectRandomNodes(pHead);
+
+        return divideEven(pHead);
+    }
+
+    // 复制节点，要从堆空间中申请节点，赋值，并正确指向
+    void ClonedNodes(RandomListNode* pHead)
+    {
+        RandomListNode* pNode = pHead;
+
+        while( pNode != NULL )
+        {
+            RandomListNode* pCloned = new RandomListNode(pNode->label);
+
+            if( pCloned )
+            {
+                pCloned->random = NULL;
+                pCloned->next = pNode->next;
+            }
+
+            pNode->next = pCloned;
+
+            pNode = pCloned->next;
+        }
+    }
+
+    void connectRandomNodes(RandomListNode* pHead)
+    {
+        RandomListNode* pNode = pHead;
+
+        while ( pNode != NULL )
+        {
+            RandomListNode* pCloned = pNode->next;
+
+            if( pNode->random != NULL )
+                pCloned->random = pNode->random->next;
+
+            pNode = pCloned->next;
+        }
+    }
+
+    RandomListNode* divideEven(RandomListNode* pHead)
+    {
+        if( pHead == NULL )
+            return NULL;
+        
+        RandomListNode* pNode = pHead;
+        RandomListNode* pClonedHead = pNode->next;
+        RandomListNode* pClonedNode = pNode->next;
+        
+        pNode->next = pClonedNode->next;	// 单数在前，偶数在后
+        pNode = pClonedNode->next;
+        
+        // 循环中一定要把克隆结点的连接放在前面，再操作原节点的连接！最后一个复制节点连接好了之后，pNode就指向了空
+        // 否则最后一次操作时pNode指向了空，pCloneNode指向了空节点的下一个位置，结果未定义，出错！
+        while( pNode != NULL )
+        {
+            pClonedNode->next = pNode->next;
+            pClonedNode = pNode->next;
+            
+            pNode->next = pClonedNode->next;	// 作为判断条件的操作一定要放在循环最后
+            pNode = pClonedNode->next;
+        }
+
+        return pClonedHead;
+    }
+};
+
+=========================26、二叉搜索树与双向链表=================
+// 中序线索化
+
+class Solution {
+public:
+
+    void inOrderThread(TreeNode* node, TreeNode*& pre)  // 递归的引擎函数
+    {
+        if( node == nullptr )   // 递归，必然要有出口！！！否则就是段错误！
+            return;
+        
+        inOrderThread(node->left, pre);
+        
+        node->left = pre;
+        if( pre != nullptr )
+            pre->right = node;
+        
+        pre = node;     // pre本来指向左子树最后一个元素，根遍历了之后就要移动到根了。
+        
+        inOrderThread(node->right, pre);
+    }
+    
+    TreeNode* Convert(TreeNode* pRootOfTree)
+    {
+        TreeNode* pre = nullptr;  // 当前遍历节点的前一个节点
+        
+        inOrderThread(pRootOfTree, pre);
+        
+		// 注意循环的条件，要同时考虑当前指针，以及left指针都不为空！！！（以后涉及到next的，把当前的Node也考虑进去）
+        while( pRootOfTree != nullptr && pRootOfTree->left != nullptr )	// 注意此时根节点在链表的中间位置，要向左移动；
+            pRootOfTree = pRootOfTree->left;
+        
+        return pRootOfTree;
+    }
+};
+
+========================27、字符串的全排列=======================
+// begin从0开始，作为选择str字串的标记位。当begin==str.size()时候，表示一个排列找到了-->出口
+class Solution {
+public:
+    vector<string> Permutation(string str) 
+    {
+        vector<string> ret;
+        
+        if( str.size() <= 0 )
+            return ret;
+        
+        PermCore(str, 0, ret);
+        sort(ret.begin(), ret.end());
+        
+        return ret;
+    }
+    
+    void PermCore(string& str, int begin, vector<string>& vec)
+    {
+        if( begin == str.size() )		// 递归的出口！！！
+        {
+            vec.push_back(str);
+        }
+        else
+        {
+            for(int i=begin; i<str.size(); i++)
+            {
+                if( i == begin || str[i] != str[begin] )	// 对于第一个字符，和值不等的时候需要交换
+                {
+                    swap(str[i], str[begin]);
+                    PermCore(str, begin+1, vec);			// 交换 --> 计算字串的全排列 --> 交换
+                    swap(str[i], str[begin]);
+                }
+            }
+        }
+    }
+};
+
+
+==========================28、数组中出现次数超过一半的数字=============
+// 方法一：直接进行排序，然后数组中间的那个数就是结果。要考虑中间的该数出现次数并不是超过一半，所以最后要进行判断。
+// 二：定义一个计数遍历times，遇到和当前数result相同的就+1，不同的就-1，如果times为0了就把新的数字作为result，times变为1
+//     超过一半的次数肯定比其他数多，所以最后的数字就是结果，注意进行合法性判断。
+
+class Solution {
+public:
+    
+    bool isMoreThanHalf(vector<int>& numbers, int result)
+    {
+        int count = 0;
+        int len = numbers.size();
+        for(int i=0; i<len; i++)
+        {
+            if( numbers[i] == result )
+                count++;
+        }
+        
+        if( count*2 > len )
+            return true;
+        else
+            return false;
+    }
+    
+
+    int MoreThanHalfNum_Solution(vector<int> numbers) 
+    {
+        int len = numbers.size();
+        
+        if( len == 0 )
+            return 0;
+        
+        int result = numbers[0];
+        int times = 1;
+        
+        for(int i=1; i<len; i++)
+        {
+            if( times == 0 )
+            {
+                result = numbers[i];
+                times = 1;
+            }
+            else if( numbers[i] == result )
+                times++;
+            else
+                times--;
+        }
+        
+        if( !isMoreThanHalf(numbers, result) )
+            return 0;
+        
+        return result;
+    }
+};
+
+==========================29、最小的k个数（TopK问题、存疑）========================
+// 法一：直接排序找前k个数
+// 法二：通过partition函数类似二分查找，不断的更新begin和end的位置，直到定位到k-1，完成类二分查找的操作！
+//       需要修改原来的数组。O(n)，不适合海量数据
+// 法三：O(nlogk)，适合海量数据。
+
+class Solution {
+public:
+    
+    int partition(vector<int>& input, int begin, int end)	// 引用的作用在于排序的时候要改变数组里的顺序
+    {
+        int pv = input[0];
+        
+        while( begin < end )
+        {
+            while( begin < end && input[end] > pv )
+                end--;
+            
+            swap(input[begin], input[end]);
+            
+            while( begin < end && input[begin] <= pv )
+                begin++;
+            
+            swap(input[begin], input[end]);
+        }
+        
+        return begin;
+    }
+    
+    vector<int> GetLeastNumbers_Solution(vector<int> input, int k) 
+    {
+        vector<int> ret;
+        
+        int len = input.size();
+        if( len == 0 || len < k || k < 1 )
+            return ret;
+        
+        int begin = 0;
+        int end = len-1;
+        int index = partition(input, begin, end);	// 看partition的结果是不是找到了第k个元素的位置
+        
+        while( index != k-1 )   // 最终找到的就是index = k-1，此时input数组的前半部分也排序好了
+        {
+            if( index > k-1 )
+            {
+                end = index-1;
+                index = partition(input, begin, end);	// index的位置也在不断的更新
+            }
+            else 
+            {
+                begin = index + 1;
+                index = partition(input, begin, end);
+            }
+        }
+        
+        for(int i=0; i<k; i++)
+        {
+            ret.push_back(input[i]);
+        }
+        
+        return ret;
+    }
+};
+
+思路：考虑创建一个容器存放k个数，如果容器中少于k个数，就把读入的数据放进去；如果大于k了，如果当前值比已有的最大值小，就替换该最大值，否则当前值不可能是k个最小的。
+当容器满了后要做三件事：1）在k个数中找到最大的；2）有可能删除该最大数；3）有可能插入一个新的数字。
+由于每次都要找到k个整数中的最大数，考虑用最大堆。最大堆中的根节点值大于子树中任一节点的值，于是可以O(1)的时间内得到最大值，O(logk)完成插入和删除
+
+用红黑树实现最大堆，set和multiset
+
+#include <set>
+
+using namespace std;
+
+typedef multiset<int, greater<int>> intSet;
+typedef multiset<int, greater<int>>::iterator setIterator;
+
+void GetLeastNumbers(const vector<int>& data, intSet& leastNumbers, int k)  // leastNumbers就是一个最大堆
+{
+    leastNumbers.clear();
+
+    if( k < 1 || data.size() < k )
+        return;
+
+    vector<int>::const_iterator iter = data.begin();	// 遍历数组元素
+    for( ; iter != data.end(); iter++)
+    {
+        if( leastNumbers.size() < k )
+            leastNumbers.insert(*iter);
+        else
+        {
+            setIterator iterGreatest = leastNumbers.begin();
+
+            if( *iter < *(leastNumbers.begin()) )   // 如果当前vector遍历到的值小于最大堆leastNumbers的第一个值，就删除最大堆的首结点，插入新的值
+            {
+                leastNumbers.erase(iterGreatest);
+
+                leastNumbers.insert(*iter);         // 插入的时候自然是排序的。
+            }
+        }
+    }
+}
+
+
+int main()
+{
+    vector<int> data{4,5,1,6,2,7,3,8};
+
+    intSet leastNumbers;
+
+    GetLeastNumbers(data, leastNumbers, 4);
+
+    setIterator it = leastNumbers.begin();
+    for( ; it != leastNumbers.end(); it++)
+        cout << *it<< " ";
+
+    return 0;
+}
+
+
+=========================30、连续子数组的最大和==================
+class Solution {
+public:
+    bool g_InvalidInput = false;
+    
+    int FindGreatestSumOfSubArray(vector<int> array) 
+    {
+        int len = array.size();
+        
+        if( len <= 0 )
+        {
+            g_InvalidInput = true;
+            return -1;
+        }
+        
+        g_InvalidInput = false;
+        
+        int curSum = 0;
+        int greatestSum = -1;
+        
+        for(int i=0; i<len; i++)
+        {
+            if( curSum <= 0 )
+                curSum = array[i];
+            else
+                curSum += array[i];
+            
+            if( curSum > greatestSum )
+                greatestSum = curSum;
+        }
+        
+        return greatestSum;
+    }
+};
+
+
+==========================丑数====================================
+int GetUglyNumber_Solution(int index) 
+    {
+        if( index <= 0 )
+            return 0;
+        
+        vector<int> result(index, 0);
+        result[0] = 1;
+        
+        int t2 = 0, t3 = 0, t5 = 0;
+        
+        for(int i=1; i<index; i++)
+        {
+            result[i] = min(result[t2]*2, min(result[t3]*3, result[t5]*5));
+            
+            if( result[i] == result[t2]*2 )
+                t2++;
+            
+            if( result[i] == result[t3]*3 )
+                t3++;
+            
+            if( result[i] == result[t5]*5 )
+                t5++;
+        }
+        
+        return result[index-1];
+    }
+};
+
+
+=======================把数组排成最小的数字===========================
+// 考虑可能溢出，使用字符串进行操作输出。comp定义了比较的规则，用字符串进行字典序比较
+然后comp用于 迭代器比较的第三个参数。
+class Solution {
+public:
+    static bool comp(int a, int b)
+    {
+        string A = "";
+        string B = "";
+        
+        A += to_string(a);
+        A += to_string(b);
+        B += to_string(b);
+        B += to_string(a);
+        
+        return A < B;
+    }
+    string PrintMinNumber(vector<int> numbers) 
+    {
+        string min = "";
+        
+        sort(numbers.begin(), numbers.end(), comp);	// bool comp 指的是排序的规则
+        
+        for(int i=0; i<numbers.size(); i++)
+        {
+            min += to_string(numbers[i]);
+        }
+        
+        return min;
+    }
+};
+
+=========================字符串到数字=============================
+// 注意考虑正负号，前面是空字符，遇到非数字，越界
+
+class Solution {
+public:
+    int StrToInt(string str) 
+    {
+        int len = str.size();
+        
+        if( len == 0 )
+            return 0;
+        
+        int flag = 1;
+        int i=0;
+        int num = 0;
+        
+        while( str[i] == ' ' )
+            i++;
+        
+        if( str[i] == '+' )
+            i++;
+        else if( str[i] == '-' )
+        {
+            flag = -1;
+            i++;
+        }
+        
+        while( str[i] != '\0' )
+        {
+            if( isdigit(str[i]) )
+            {
+                num = num*10 + flag*(str[i]-'0');
+                i++;
+                
+                if( num > INT_MAX || num < INT_MIN )
+                {
+                    num = 0;
+                    break;
+                }
+            }
+            else
+            {
+                num = 0;
+                break;
+            }
+        }
+        
+        return num;
+    }
+};
+
+========================滑动窗口的最大值=================
+使用双端队列来存储数组的下标。队列的首元素始终是当前窗口最大值元素的下标；
+当前元素大于队列的尾部元素时，就循环弹出尾部元素，加入当前元素。
+注意如果当前元素长度已经大于窗口大小了，就要弹出队首元素。
+
+class Solution {
+public:
+    vector<int> maxInWindows(const vector<int>& num, unsigned int size)
+    {
+        vector<int> ret;
+        
+        if( num.size() == 0 || size <=0 || size > num.size() )
+            return ret;
+        
+        deque<int> que;
+        
+        for(int i=0; i<size; i++)
+        {
+            if( !que.empty() && num[i] > num[que.back()] )
+                que.pop_back();
+            
+            que.push_back(i);
+        }
+        
+        ret.push_back(num[que.front()]);
+        
+        for(int i=size; i<num.size(); i++)
+        {
+            while( !que.empty() && num[i] > num[que.back()] )
+                que.pop_back();
+            
+            que.push_back(i);
+            
+            if( !que.empty() && (i-size+1 > que.front()) )
+                que.pop_front();
+            
+            ret.push_back(num[que.front()]);
+        }
+        
+        return ret;
+    }
+};
+
+
+=======================二叉搜索树的第k个节点====================
+// 关键在于二叉搜索树本就是排序的，寻找第k个节点，定义变量，到k的时候就是第k个了
+class Solution {
+public:
+    int index = 0;
+    
+    void inOrder(TreeNode* root, TreeNode*& ret, int k)
+    {
+        if( root )
+        {
+            inOrder(root->left, ret, k);
+            
+            index++;
+            if( index == k )
+                ret = root;
+            
+            inOrder(root->right, ret, k);
+        }
+    }
+    
+    TreeNode* KthNode(TreeNode* pRoot, int k)
+    {
+        TreeNode* ret = NULL;
+        
+        if( pRoot == NULL || k < 0 )
+            return ret;
+
+        inOrder(pRoot, ret, k);
+        
+        return ret;
+    }  
+};
+
+// 用栈来实现非递归的中序遍历
+class Solution {
+public:
+    stack<TreeNode*> m_stack;
+    
+    TreeNode* KthNode(TreeNode* pRoot, int k)
+    {
+        if( pRoot == NULL || k < 0 )
+            return NULL;
+        
+        int count = 0;
+        TreeNode* node = pRoot;
+        
+        do
+        {
+            if( node )
+            {
+                m_stack.push(node);
+                node = node->left;
+            }
+            else
+            {
+                node = m_stack.top();
+				m_stack.pop();
+                
+                count++;
+                if( count == k )
+                    return node;
+                
+                node = node->right;             
+            }
+            
+        } while( node != NULL || !m_stack.empty() );
+        
+        return NULL;
+    }
+
+    
+};
+
+
+=======================序列化和反序列化二叉树==================
+
+char* Serialize(TreeNode* root)
+{
+	if( root == NULL )
+		return "#";
+	
+	string ret = to_string(root->val);
+	ret += ",";
+	char* left = Serialize(root->left);
+	char* right = Serialize(root->right);
+	char* p = new char[strlen(left) + strlen(right) + ret.size()];
+	
+	strcpy(p, ret.c_str());
+	strcat(p, left);
+	strcat(p, right);
+	
+	return p;
+}
+
+TreeNode* func(char*& str)
+{
+	if( *str == '#' )
+	{
+		str++;
+		return NULL;
+	}
+	
+	int num = 0;
+	while( *str != ',' )
+	{
+		num = num * 10 + (*(str++) - '0');
+	}
+	
+	str++;
+	TreeNode* root = new TreeNode(num);
+	root->left = func(str);
+	root->right = func(str);
+	
+	return root;
+}
+
+TreeNode* Deserialize(char* str)
+{
+	return func(str);
+}
+
+===================循环链表解决约瑟夫环问题===================
+// 使用STL中的list模拟循环链表，关键在于遍历到最后一个节点的时候再指向下一个节点
+// 使用到了STL中的迭代器！注意
+int josph(int n, int m)
+{
+    if( n < 1 || m < 1)
+        return  -1;
+
+    list<int> numbers;
+    for(int i=1; i<=n; i++)
+    {
+        numbers.push_back(i);
+    }
+
+    list<int>::iterator current = numbers.begin();
+
+    while( numbers.size() > 1 )
+    {
+        for(int i=1; i<m; i++)
+        {
+            current++;
+            if( current == numbers.end() )
+                current = numbers.begin();
+        }
+
+        list<int>::iterator next = ++current;   // 中间变量保存toDel的下一位置(要注意是++current！！！)
+        if( next == numbers.end() )
+            next = numbers.begin();
+
+        --current;  // 上一步的next已经将current向后移动了，所以需要向前移动，指向要删除的元素
+        cout << *current << endl;
+        numbers.erase(current);
+        current = next;
+    }
+
+    return numbers.front();
+}
+
+
+**************************error**********************************
+
+========================构建乘积数组==============================
+class Solution {
+public:
+    vector<int> multiply(const vector<int>& A) 
+    {
+        int n = A.size();
+        
+        vector<int> res(n);
+        
+        if( n == 0 )
+            return res;
+            
+        res[0] = 1;
+        for(int i=1; i<n; ++i)
+            res[i] = res[i-1] * A[i-1];
+        
+        int temp = 1;
+        
+        for(int j=n-2; j >=0; j--)
+        {
+            temp *= A[j+1];
+            res[j] *= temp;
+        }
+        
+        return res;
+    }
+};
+
+=========================数组中的逆序对============================
+// 在归并排序的同时统计逆序对的数量
+
+class Solution {
+public:
+    int InversePairs(vector<int> data) 
+    {
+        int len = data.size();
+        if( len <= 0  )
+            return 0;
+        
+        vector<int> tmp;
+        for(int i=0; i<len; i++)
+            tmp.push_back(data[i]);
+        
+        long long count = InversePairsCore(data, tmp, 0, len-1);
+        
+        return count % 1000000007;
+    }
+    
+    long long InversePairsCore(vector<int>& data, vector<int>& tmp, int begin, int end)
+    {
+        if( begin == end )
+        {
+            tmp[begin] = data[begin];
+            return 0;
+        }
+
+        int len = (end - begin) / 2;
+        long long left = InversePairsCore(tmp, data, begin, begin+len);
+        long long right = InversePairsCore(tmp, data, begin+len+1, end);
+        
+        int i = begin + len;
+        int j = end;
+        int indexTmp = end;
+        long long count = 0;
+        // 计算逆序对的数量
+        while( i >= begin && j >= begin+len+1 )
+        {
+            if( data[i] > data[j] )
+            {
+                tmp[indexTmp--] = data[i--];
+                
+                count += j - begin - len;    // j-(begin+len+1)+1
+            }
+            else
+            {
+                tmp[indexTmp--] = data[j--];
+            }
+        }
+        
+        while( i >= begin ) tmp[indexTmp--] = data[i--];
+        while( j >= begin+len+1 ) tmp[indexTmp--] = data[j--];
+        
+        return left + right + count;
+    }
+};
+
+
+=========================n个骰子点数的概率===========================
+#include <iostream>
+//#include <cstring>
+	
+using namespace std;
+
+
+void FindSum(int n)
+{
+	if( n <= 0 )
+		return ;
+	
+	int sum = 0;
+	int arr[n + 1][6*n + 1];
+	
+	for(int i=1; i<=6; i++)	// 初始状态
+	{
+		arr[1][i] = 1;
+	}
+	
+	for(int i=2; i<=n; i++)		// 状态转移方程
+	{
+		for(int j=i; j<=6*i; j++)	// 注意j的范围受i影响
+		{
+			arr[i][j] += (arr[i-1][j-1] + arr[i-1][j-2] + arr[i-1][j-3] + arr[i-1][j-4] 
+						 + arr[i-1][j-5] + arr[i-1][j-6]);
+		}
+		
+	}
+	
+	// 输出结果
+	for(int i=n; i<=6*n; i++)
+	{
+		sum += arr[n][i];
+	}
+	
+	cout << n << "个骰子总共的次数为 " << sum << endl;
+	
+	for(int i=n; i<=6*n; i++)
+	{
+		cout << "骰子的和为 " << i << "时，对应的频率为：" << (arr[n][i] * 1.0 / sum) << endl;
+	}
+}
+
+int main() 
+{
+	
+	FindSum(5);
+	
+	cout << endl << "hello https://tool.lu/" << endl;
+	return 0;
+}
+
+
+
+
+
+		
+

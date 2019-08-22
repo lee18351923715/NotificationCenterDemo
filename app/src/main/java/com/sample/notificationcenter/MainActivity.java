@@ -158,6 +158,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             edit.setText("取消");
             visibilityLayout.setVisibility(View.INVISIBLE);
         } else {
+            selectedPosition.clear();
             //取消编辑状态
             showEdit(View.INVISIBLE);
             edit.setText("编辑");
@@ -234,6 +235,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             bean.setFlag(1);
             MessageDAO.update(this, bean);//bean对象已读状态发生变化后同步更新到数据库中
         }
+        selectedPosition.clear();
         unEdit();//回到未编辑状态
         updateUnRead();
         adapter.notifyDataSetChanged();
@@ -318,6 +320,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 updateUnRead();
             } else if (id == R.id.right_button) {
                 //取消按钮功能
+                selectedPosition.clear();
                 unEdit();
                 recyclerView.closeMenu();
                 adapter.notifyDataSetChanged();
